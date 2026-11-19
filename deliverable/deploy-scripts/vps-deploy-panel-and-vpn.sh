@@ -44,6 +44,16 @@ log()  { printf '\033[1;36m[JTS-VPS-DEPLOY]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
+if [[ -n "$BOOTSTRAP_DIR" ]]; then
+  [[ -f "$BOOTSTRAP_DIR/admin-email.b64" && -f "$BOOTSTRAP_DIR/admin-password.b64" ]] || fail "Fichiers bootstrap Super Admin manquants."
+  SUPERADMIN_EMAIL="$(base64 --decode "$BOOTSTRAP_DIR/admin-email.b64")"
+  SUPERADMIN_PASSWORD="$(base64 --decode "$BOOTSTRAP_DIR/admin-password.b64")"
+  trap 'rm -f "$BOOTSTRAP_DIR/admin-email.b64" "$BOOTSTRAP_DIR/admin-password.b64"; rmdir "$BOOTSTRAP_DIR" 2>/dev/null || true' EXIT
+fi
+
+[[ "$SUPERADMIN_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$ ]] || fail "JTS_SUPERADMIN_EMAIL invalide ou manquant."
+[[ ${#SUPERADMIN_PASSWORD} -ge 16 && "$SUPERADMIN_PASSWORD" =~ ^[A-Za-z0-9_-]+$ ]] || fail "JTS_SUPERADMIN_PASSWORD doit faire 16 caractères minimum (lettres, chiffres, _ ou -)."
+
 
 [[ $EUID -eq 0 ]] || fail "Ce script doit être exécuté en tant que root (ou via sudo)."
 
@@ -135,11 +145,26 @@ ok "Build frontend Vite et serveur TypeScript prêts."
 # ------------------------------------------------------------------------------
 log "3/7 — Configuration de l'environnement (.env) pour ${PUBLIC_SCHEME}://${PANEL_HOST}..."
 ENV_FILE="${INSTALL_DIR}/.env"
-dotenv_quote() {
-  local value="$1"
-  value=${value//\\/\\\\}
-  value=${value//\"/\\\"}
-  value=${value//
+JTS_MOBILE_CONTRACT_SECRET="${JTS_MOBILE_CONTRACT_SECRET:-$(openssl rand -hex 32)}"
+{
+  cat <<EOF
+NODE_ENV=production
+PORT=3000
+APP_URL=${PUBLIC_SCHEME}://${PANEL_HOST}
+JTS_SUPERADMIN_EMAIL=${SUPERADMIN_EMAIL}
+JTS_SUPERADMIN_PASSWORD=${SUPERADMIN_PASSWORD}
+JTS_MOBILE_CONTRACT_SECRET=${JTS_MOBILE_CONTRACT_SECRET}
+JTS_SLOWDNS_NS_DOMAIN=${JTS_SLOWDNS_NS_DOMAIN:-}
+JTS_SLOWDNS_PUBKEY=${JTS_SLOWDNS_PUBKEY:-}
+MTN_MOMO_BENEFICIARY="${MTN_MOMO_BENEFICIARY:-}"
+MTN_MOMO_NUMBER="${MTN_MOMO_NUMBER:-}"
+ORANGE_MONEY_BENEFICIARY="${ORANGE_MONEY_BENEFICIARY:-}"
+ORANGE_MONEY_NUMBER="${ORANGE_MONEY_NUMBER:-}"
+ORANGE_MERCHANT_OM_ASSO="${ORANGE_MERCHANT_OM_ASSO:-}"
+ORANGE_MONTHLY_CEILING_FCFA="${ORANGE_MONTHLY_CEILING_FCFA:-1500000}"
+EOF
+} > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 ok "Fichier ${ENV_FILE} généré (APP_URL=${PUBLIC_SCHEME}://${PANEL_HOST} | Super Admin: ${SUPERADMIN_EMAIL})."
 
 # ------------------------------------------------------------------------------
