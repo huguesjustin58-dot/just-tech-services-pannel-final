@@ -210,81 +210,30 @@ export class RbacAuthService {
     this.loadPersistedOverrides();
   }
 
-  private seedDefaultAccounts() {
-    const defaults: Array<{
-      id: string;
-      name: string;
-      email: string;
-      role: SessionRole;
-      password: string;
-      mustChangePassword: boolean;
-    }> = [
-      {
-        id: 'usr-superadmin',
-        name: 'Justin Hugues (Super Admin)',
-        email: (process.env.JTS_SUPERADMIN_EMAIL || 'huguesjustin58@gmail.com').toLowerCase(),
-        role: 'super_admin',
-        password: process.env.JTS_SUPERADMIN_PASSWORD || '@Moddingjust',
-        mustChangePassword: true,
-      },
-      {
-        id: 'usr-admin',
-        name: 'Aline Nguema (Admin)',
-        email: (process.env.JTS_ADMIN_EMAIL || 'admin@justtechservices.xyz').toLowerCase(),
-        role: 'admin',
-        password: process.env.JTS_ADMIN_PASSWORD || 'Admin2026!',
-        mustChangePassword: false,
-      },
-      {
-        id: 'usr-manager',
-        name: 'Patrick Essomba (Manager)',
-        email: (process.env.JTS_MANAGER_EMAIL || 'manager@justtechservices.xyz').toLowerCase(),
-        role: 'manager',
-        password: process.env.JTS_MANAGER_PASSWORD || 'Manager2026!',
-        mustChangePassword: false,
-      },
-      {
-        id: 'usr-reseller',
-        name: 'KamerNet Telecom (Revendeur)',
-        email: (process.env.JTS_RESELLER_EMAIL || 'reseller@justtechservices.xyz').toLowerCase(),
-        role: 'reseller',
-        password: process.env.JTS_RESELLER_PASSWORD || 'Reseller2026!',
-        mustChangePassword: false,
-      },
-      {
-        id: 'usr-subreseller',
-        name: 'Douala Express Net (Sous-revendeur)',
-        email: (process.env.JTS_SUB_RESELLER_EMAIL || 'subreseller@justtechservices.xyz').toLowerCase(),
-        role: 'sub_reseller',
-        password: process.env.JTS_SUB_RESELLER_PASSWORD || 'SubReseller2026!',
-        mustChangePassword: false,
-      },
-      {
-        id: 'usr-client',
-        name: 'Franck Mbarga (Client)',
-        email: 'client@justtechservices.xyz',
-        role: 'client',
-        password: process.env.JTS_CLIENT_PASSWORD || 'Client2026!',
-        mustChangePassword: false,
-      },
-    ];
+  private seedDefaultAccounts(): void {
+    const email = process.env.JTS_SUPERADMIN_EMAIL?.trim().toLowerCase();
+    const password = process.env.JTS_SUPERADMIN_PASSWORD ?? '';
 
-    const now = new Date().toISOString();
-    for (const acc of defaults) {
-      const { salt, hash } = hashPassword(acc.password);
-      this.users.set(acc.id, {
-        id: acc.id,
-        name: acc.name,
-        email: acc.email,
-        role: acc.role,
-        salt,
-        passwordHash: hash,
-        isActive: true,
-        mustChangePassword: acc.mustChangePassword,
-        createdAt: now,
-        lastLoginAt: null,
-      });
+    if (!email || !password) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('JTS_SUPERADMIN_EMAIL et JTS_SUPERADMIN_PASSWORD doivent être configurés en production.');
+      }
+      return;
     }
+
+    const { salt, hash } = hashPassword(password);
+    this.users.set('usr-superadmin', {
+      id: 'usr-superadmin',
+      name: 'Super Administrateur',
+      email,
+      role: 'super_admin',
+      salt,
+      passwordHash: hash,
+      isActive: true,
+      mustChangePassword: true,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: null,
+    });
   }
 
   private loadPersistedOverrides(): void {
@@ -304,7 +253,14 @@ export class RbacAuthService {
           existing.isActive = typeof saved.isActive === 'boolean' ? saved.isActive : existing.isActive;
           existing.role = VALID_ROLES.includes(saved.role) ? saved.role : existing.role;
           existing.lastLoginAt = saved.lastLoginAt ?? existing.lastLoginAt;
-        } else if (!existing) {
+        } else if (!existing && !new Set([
+          'usr-superadmin',
+          'usr-admin',
+          'usr-manager',
+          'usr-reseller',
+          'usr-subreseller',
+          'usr-client',
+        ]).has(saved.id)) {
           this.users.set(saved.id, {
             ...saved,
             mustChangePassword: Boolean(saved.mustChangePassword),
