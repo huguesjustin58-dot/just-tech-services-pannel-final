@@ -151,12 +151,11 @@ export class CloudConfigEngine {
   private readonly signingSecret: string;
 
   constructor() {
-    this.signingSecret =
-      process.env.JTS_MOBILE_CONTRACT_SECRET ||
-      crypto
-        .createHash('sha256')
-        .update(`jts-cloud-contract-${process.env.GEMINI_API_KEY || 'dev-key'}`)
-        .digest('hex');
+    const configuredSecret = process.env.JTS_MOBILE_CONTRACT_SECRET;
+    if (process.env.NODE_ENV === 'production' && (!configuredSecret || configuredSecret.length < 64)) {
+      throw new Error('JTS_MOBILE_CONTRACT_SECRET must be configured with at least 64 characters in production.');
+    }
+    this.signingSecret = configuredSecret || crypto.randomBytes(32).toString('hex');
   }
 
   public get size(): number {
@@ -373,9 +372,9 @@ export class CloudConfigEngine {
       slowdns: 53,
     };
 
-    const slowDnsNs = process.env.JTS_SLOWDNS_NS_DOMAIN || 'sdns1.justtechservices.xyz';
+    const slowDnsNs = process.env.JTS_SLOWDNS_NS_DOMAIN || '';
     const slowDnsPubKey =
-      process.env.JTS_SLOWDNS_PUBKEY || '7f8b41c2e9a014d58b22e7c3a1f098e6d3b14a7c8f21e09b';
+      process.env.JTS_SLOWDNS_PUBKEY || '';
     const operationalProtocols: VpnProtocolKey[] = ['ssh', 'ssh_wss'];
     if (slowDnsNs && slowDnsPubKey) {
       operationalProtocols.push('ssh_slowdns');
