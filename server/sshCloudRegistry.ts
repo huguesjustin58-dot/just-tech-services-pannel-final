@@ -76,7 +76,7 @@ export type ResolveCloudResult =
       revokedAt?: string | null;
     };
 
-const CLOUD_CODE_REGEX = /^JTS-[A-F0-9]{8}-[A-F0-9]{8}$/;
+const CLOUD_CODE_REGEX = /^JTS-[A-F0-9]{16}-[A-F0-9]{16}$/;
 
 const ROLE_MAX_QUOTA_GB: Record<SessionRole, number | null> = {
   super_admin: null,
@@ -88,8 +88,8 @@ const ROLE_MAX_QUOTA_GB: Record<SessionRole, number | null> = {
 };
 
 function generateShortCloudCode(): string {
-  const seg1 = crypto.randomBytes(4).toString('hex').toUpperCase();
-  const seg2 = crypto.randomBytes(4).toString('hex').toUpperCase();
+  const seg1 = crypto.randomBytes(8).toString('hex').toUpperCase();
+  const seg2 = crypto.randomBytes(8).toString('hex').toUpperCase();
   return `JTS-${seg1}-${seg2}`;
 }
 
