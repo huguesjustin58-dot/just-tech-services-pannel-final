@@ -472,15 +472,6 @@ async function startServer() {
         const plan = OFFICIAL_PLANS.find((p) => p.id === tx.planId) ?? OFFICIAL_PLANS[5] ?? OFFICIAL_PLANS[0];
         const { sshUsername, sshPassword } = createRandomCredentials(tx.clientName);
         const deliveryToken = `deliv_${crypto.randomBytes(12).toString('hex')}`;
-        pendingDeliveriesStore.set(deliveryToken, {
-          token: deliveryToken,
-          plan,
-          clientName: tx.clientName,
-          sshUsername,
-          sshPassword,
-          createdAt: Date.now(),
-        });
-
         let cloudRecord: PublicCloudBundleResponse | null = null;
         let npvFileContent: string | null = null;
         let npvFilename: string | null = null;
@@ -499,18 +490,29 @@ async function startServer() {
           licenseStatus: 'Active',
         });
 
-        if (issued.ok) {
-          cloudRecord = issued.bundle;
-          if (tx.platform === 'iphone') {
-            const activeProto =
-              typeof tx.prototypeJson === 'string' && tx.prototypeJson.length > 0
-                ? tx.prototypeJson
-                : activeNpvPrototypeJson;
-            const compiled = cloudEngine.compilePrivateNpvt(issued.bundle.code, activeProto);
-            if (compiled.ok) {
-              npvFileContent = compiled.content;
-              npvFilename = compiled.filename;
-            }
+        if (!issued.ok) {
+          throw new Error(issued.error || 'Impossible de créer le pass Cloud après validation.');
+        }
+        cloudRecord = issued.bundle;
+        pendingDeliveriesStore.set(deliveryToken, {
+          token: deliveryToken,
+          plan,
+          clientName: tx.clientName,
+          sshUsername,
+          sshPassword,
+          cloudRecord: issued.bundle,
+          createdAt: Date.now(),
+        });
+
+        if (tx.platform === 'iphone') {
+          const activeProto =
+            typeof tx.prototypeJson === 'string' && tx.prototypeJson.length > 0
+              ? tx.prototypeJson
+              : activeNpvPrototypeJson;
+          const compiled = cloudEngine.compilePrivateNpvt(issued.bundle.code, activeProto);
+          if (compiled.ok) {
+            npvFileContent = compiled.content;
+            npvFilename = compiled.filename;
           }
         }
 
@@ -543,8 +545,13 @@ async function startServer() {
 
   // 1. Configuration paiement & plafond Orange Money
   app.get('/api/payment-config', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
-      ...paymentGatewayState,
+      mtnBeneficiary: paymentGatewayState.mtnBeneficiary,
+      mtnNumber: paymentGatewayState.mtnNumber,
+      orangeBeneficiary: paymentGatewayState.orangeBeneficiary,
+      orangeNumber: paymentGatewayState.orangeNumber,
+      orangeMerchantOmAsso: paymentGatewayState.orangeMerchantOmAsso,
       orangeCeilingExceeded: isOrangeCeilingExceeded(),
     });
   });
@@ -619,8 +626,12 @@ async function startServer() {
   );
 
   // 3. Éligibilité Test Gratuit (1 par appareil, 2 générations max par compte client)
-  app.get('/api/test-eligibility', (req, res) => {
-    const accountId = String(req.query.accountId || 'client-default');
+  app.get('/api/test-eligibility', (req: AuthenticatedRequest, res) => {
+    if (!req.authUser || req.authUser.role !== 'client') {
+      res.status(401).json({ error: 'Connectez-vous à votre compte client pour vérifier votre éligibilité.' });
+      return;
+    }
+    const accountId = req.authUser.id;
     const deviceFingerprint = String(req.query.deviceFingerprint || '');
     const usedOnAccount = accountTestGenerations.get(accountId) ?? 0;
     const deviceClaim = deviceFingerprint ? deviceTestRegistry.get(deviceFingerprint) : undefined;
@@ -710,7 +721,7 @@ async function startServer() {
 
   // 4. Module Génération Configurations Cloud (JSON / Lien URI / Token / QR / .npvt)
   //    Connecté aux pass et quotas clients réels · ZÉRO secret/mot de passe en clair dans QR ou liens publics
-  app.post('/api/cloud-config/generate', async (req, res) => {
+  app.post('/api/cloud-config/generate', authRbac.requireRoles(['super_admin', 'admin', 'manager', 'reseller', 'sub_reseller']), async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, private');
     try {
       const {
@@ -1144,6 +1155,7 @@ interface PendingDelivery {
   clientName: string;
   sshUsername: string;
   sshPassword: string;
+  cloudRecord: PublicCloudBundleResponse;
   createdAt: number;
 }
 
@@ -1152,7 +1164,7 @@ const pendingDeliveriesStore = new Map<string, PendingDelivery>();
   // 5. Agent IA Autonome (AIPaymentAgent + Gemini gemini-4-hydrogen) :
   //    Interroge l'API opérateur configurée, vérifie les règles Free Test & OM ASSO,
   //    puis déclenche le provisionnement automatique Android Cloud / iPhone .npvt
-  app.post('/api/agent/verify-and-provision', async (req, res) => {
+  app.post('/api/agent/verify-and-provision', async (req: AuthenticatedRequest, res) => {
     try {
       const {
         planId,
@@ -1180,7 +1192,12 @@ const pendingDeliveriesStore = new Map<string, PendingDelivery>();
         return;
       }
 
-      const usedOnAccount = accountTestGenerations.get(accountId) ?? 0;
+      if (plan.category === 'OFFRE TEST GRATUIT' && (!req.authUser || req.authUser.role !== 'client')) {
+        res.status(401).json({ approved: false, code: 'CLIENT_LOGIN_REQUIRED', error: 'Connectez-vous à votre compte client pour demander un test gratuit.' });
+        return;
+      }
+      const verifiedAccountId = plan.category === 'OFFRE TEST GRATUIT' ? req.authUser!.id : String(accountId);
+      const usedOnAccount = accountTestGenerations.get(verifiedAccountId) ?? 0;
       const existingDeviceTest = deviceTestRegistry.get(deviceFingerprint);
 
       // Garde-fous durs côté serveur pour Test Gratuit
@@ -1226,7 +1243,7 @@ const pendingDeliveriesStore = new Map<string, PendingDelivery>();
         screenshotBase64,
         screenshotMimeType,
         clientName,
-        accountId,
+        accountId: verifiedAccountId,
         deviceFingerprint,
         platform,
         prototypeJson,
@@ -1272,7 +1289,7 @@ const pendingDeliveriesStore = new Map<string, PendingDelivery>();
         cloudRecord: outcome.cloudRecord ?? null,
         npvFilename: outcome.npvFilename ?? null,
         npvFileContent: outcome.npvFileContent ?? null,
-        remainingAccountTests: Math.max(0, 2 - (accountTestGenerations.get(accountId) ?? usedOnAccount)),
+        remainingAccountTests: Math.max(0, 2 - (accountTestGenerations.get(verifiedAccountId) ?? usedOnAccount)),
         deviceAlreadyUsed: deviceTestRegistry.has(deviceFingerprint),
         orangeCeilingExceeded: isOrangeCeilingExceeded(),
       });
@@ -1294,7 +1311,7 @@ const pendingDeliveriesStore = new Map<string, PendingDelivery>();
   );
 
   // 5e. Alertes automatiques AIPaymentAgent (plafond Orange, provisionnements, échecs)
-  app.get('/api/agent/alerts', (_req, res) => {
+  app.get('/api/agent/alerts', authRbac.requireRoles(['super_admin', 'admin', 'manager']), (_req, res) => {
     res.json({
       alerts: paymentAgent.getAlerts(),
       orangeCeilingExceeded: paymentAgent.isOrangeCeilingExceeded(),
@@ -1302,78 +1319,49 @@ const pendingDeliveriesStore = new Map<string, PendingDelivery>();
   });
 
   // 5b. Sélection d'OS post-paiement (Android Cloud Key vs iPhone .npvt depuis prototype)
-  app.post('/api/delivery/select-os', async (req, res) => {
+  app.post('/api/delivery/select-os', (req, res) => {
     res.setHeader('Cache-Control', 'no-store, private');
-    const {
-      deliveryToken,
-      platform,
-      prototypeJson,
-      planId,
-      planName,
-      clientName = 'Franck Mbarga',
-      dataQuotaGb,
-      dataUsedGb = 0,
-      expiresAt,
-      maxSessions,
-      serverCode = 'VPS-CM-01',
-      licenseStatus = 'Active',
-      sshUsername: reqSshUser,
-      sshPassword: reqSshPass,
-    } = req.body ?? {};
+    const deliveryToken = typeof req.body?.deliveryToken === 'string' ? req.body.deliveryToken.trim() : '';
+    const platform = req.body?.platform;
 
     if (platform !== 'android' && platform !== 'iphone') {
       res.status(400).json({ error: 'Plateforme invalide : choisissez android ou iphone.' });
       return;
     }
 
-    const pending = deliveryToken ? pendingDeliveriesStore.get(String(deliveryToken)) : undefined;
-    const plan = pending?.plan ?? OFFICIAL_PLANS.find((p) => p.id === planId) ?? OFFICIAL_PLANS[5] ?? OFFICIAL_PLANS[0];
-    const resolvedClient = pending?.clientName ?? clientName;
-    const sshUsername = pending?.sshUsername ?? reqSshUser ?? createRandomCredentials(resolvedClient).sshUsername;
-    const sshPassword = pending?.sshPassword ?? reqSshPass ?? createRandomCredentials(resolvedClient).sshPassword;
-
-    const issued = await cloudEngine.issueBundle({
-      planId: plan.id,
-      planName: typeof planName === 'string' && planName.trim() ? planName.trim() : `${plan.name} (${plan.durationLabel})`,
-      clientName: String(resolvedClient),
-      dataQuotaGb: typeof dataQuotaGb === 'number' && Number.isFinite(dataQuotaGb) ? dataQuotaGb : (plan.dataQuotaGb ?? 5),
-      dataUsedGb: typeof dataUsedGb === 'number' && Number.isFinite(dataUsedGb) ? dataUsedGb : 0,
-      durationHours: plan.durationHours,
-      expiresAt: typeof expiresAt === 'string' ? expiresAt : undefined,
-      maxSessions: typeof maxSessions === 'number' && maxSessions > 0 ? maxSessions : plan.maxSessions,
-      serverCode: String(serverCode || 'VPS-CM-01'),
-      licenseStatus: String(licenseStatus || 'Active'),
-      sshUsername,
-      sshPassword,
-    });
-
-    if (!issued.ok) {
-      res.status(issued.status).json({ error: issued.error });
+    const pending = deliveryToken ? pendingDeliveriesStore.get(deliveryToken) : undefined;
+    if (!pending || Date.now() - pending.createdAt > 10 * 60 * 1000) {
+      if (deliveryToken) pendingDeliveriesStore.delete(deliveryToken);
+      res.status(410).json({ error: 'Validation expirée ou absente. Reprenez la vérification du paiement.' });
       return;
     }
+    // Un jeton de livraison ne peut être consommé qu'une seule fois.
+    pendingDeliveriesStore.delete(deliveryToken);
 
     if (platform === 'android') {
       res.json({
         platform: 'android',
-        cloudRecord: issued.bundle,
-        sshUsername,
+        cloudRecord: pending.cloudRecord,
+        sshUsername: pending.sshUsername,
       });
       return;
     }
 
     const activeProto =
-      typeof prototypeJson === 'string' && prototypeJson.length > 0 ? prototypeJson : activeNpvPrototypeJson;
-    const compiled = cloudEngine.compilePrivateNpvt(issued.bundle.code, activeProto);
+      typeof req.body?.prototypeJson === 'string' && req.body.prototypeJson.length > 0
+        ? req.body.prototypeJson
+        : activeNpvPrototypeJson;
+    const compiled = cloudEngine.compilePrivateNpvt(pending.cloudRecord.code, activeProto);
     if (!compiled.ok) {
       res.status(compiled.status).json({ error: compiled.error });
       return;
     }
     res.json({
       platform: 'iphone',
-      cloudRecord: issued.bundle,
+      cloudRecord: pending.cloudRecord,
       npvFilename: compiled.filename,
       npvFileContent: compiled.content,
-      sshUsername,
+      sshUsername: pending.sshUsername,
     });
   });
 
