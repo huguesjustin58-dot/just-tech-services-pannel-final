@@ -27,6 +27,7 @@ import {
   formatFcfa,
 } from '../data/maquetteData';
 import {
+  AuthenticatedUser,
   CloudActivationRecord,
   CloudConfigBundle,
   DeliveryPlatform,
@@ -54,6 +55,7 @@ interface ClientForensicReport {
 }
 
 interface ClientWorkspaceProps {
+  currentUser: AuthenticatedUser | null;
   npvPrototype: NpvPrototype;
   latestCloudCode: CloudActivationRecord | null;
   onGenerateCloudCode: (
@@ -77,11 +79,13 @@ function getOrCreateDeviceFingerprint(): string {
 }
 
 export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
+  currentUser,
   npvPrototype,
   latestCloudCode,
   onGenerateCloudCode,
 }) => {
-  const [accountId] = useState('client-fmbarga92');
+  const accountId = currentUser?.id ?? '';
+  const clientName = currentUser?.name || 'Client JTS';
   const [deviceFingerprint] = useState<string>(() => getOrCreateDeviceFingerprint());
 
   const [selectedPlan, setSelectedPlan] = useState<PlanOffer>(
@@ -90,15 +94,15 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
   const [activeExpiry] = useState('2026-12-18');
   const [dataUsedGb] = useState(14.2);
   const [sshCredentials, setSshCredentials] = useState({
-    username: 'jts_fmbarga92',
-    password: 'Kx9#pL2vQ8mN',
+    username: '',
+    password: '',
   });
 
   // État passerelles paiement & plafond Orange OM ASSO
   const [paymentConfig, setPaymentConfig] = useState<PaymentGatewayConfig>({
     ...PAYMENT_ACCOUNTS,
     orangeCeilingFcfa: 1500000,
-    orangeCurrentVolumeFcfa: 1180000,
+    orangeCurrentVolumeFcfa: 0,
     orangeCeilingReachedManual: false,
     orangeCeilingExceeded: false,
   });
@@ -299,7 +303,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
           smsProof,
           screenshotBase64,
           screenshotMimeType,
-          clientName: 'Franck Mbarga',
+          clientName: clientName,
           accountId,
           deviceFingerprint,
           prototypeJson: npvPrototype.rawTemplateJson,
@@ -335,7 +339,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
         setDeviceAlreadyTested(true);
         serviceAIAgent.issueTestCode({
           accountId,
-          clientName: 'Franck Mbarga',
+          clientName: clientName,
           deviceFingerprint,
           platform: selectedPlatform ?? 'android',
           explicitCode: data.cloudCode ?? undefined,
@@ -344,7 +348,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
         serviceAIAgent.logActivity({
           category: 'subscription',
           action: 'subscription.validated',
-          actor: 'Franck Mbarga',
+          actor: clientName,
           target: checkoutPlan.name,
           severity: 'ok',
           detail: `${checkoutPlan.name} (${checkoutPlan.priceFcfa} FCFA) validé via ${paymentMethod}.`,
@@ -372,7 +376,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
         body: JSON.stringify({
           planId: plan.id,
           planName: `${plan.name} (${plan.durationLabel})`,
-          clientName: 'Franck Mbarga',
+          clientName: clientName,
           dataQuotaGb: plan.dataQuotaGb ?? 3,
           dataUsedGb: usedGb,
           durationHours: plan.durationHours,
@@ -391,7 +395,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
       }
       setActiveCloudBundle(data.bundle);
       const created = onGenerateCloudCode(
-        'Franck Mbarga',
+        clientName,
         data.bundle.planName,
         sshCredentials.username,
         data.bundle.code
@@ -461,7 +465,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
           prototypeJson: npvPrototype.rawTemplateJson,
           planId: selectedPlan.id,
           planName: `${selectedPlan.name} (${selectedPlan.durationLabel})`,
-          clientName: 'Franck Mbarga',
+          clientName: clientName,
           dataQuotaGb: selectedPlan.dataQuotaGb ?? 3,
           dataUsedGb,
           expiresAt: `${activeExpiry}T23:59:59Z`,
@@ -480,7 +484,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
         }
         if (os === 'android' && data.cloudRecord) {
           const created = onGenerateCloudCode(
-            'Franck Mbarga',
+            clientName,
             `${selectedPlan.name} (${selectedPlan.durationLabel})`,
             data.sshUsername || sshCredentials.username,
             data.cloudRecord.code
