@@ -83,10 +83,19 @@ export interface PublicCloudBundleResponse {
 const BYTES_PER_GB = 1024 * 1024 * 1024;
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h opaque short-lived exchange token
 
+function configuredDefaultServerHost(): string {
+  if (process.env.JTS_DEFAULT_SERVER_HOST) return process.env.JTS_DEFAULT_SERVER_HOST;
+  try {
+    return new URL(process.env.APP_URL || '').hostname;
+  } catch {
+    return '';
+  }
+}
+
 const SERVER_NODES_MAP: Record<string, { host: string; ssh: number; wss: number; slowdns: number }> = {
-  'VPS-CM-01': { host: 'vps1.justtechservices.xyz', ssh: 22, wss: 443, slowdns: 53 },
-  'VPS-FR-02': { host: 'vps2.justtechservices.xyz', ssh: 22, wss: 443, slowdns: 53 },
-  'VPS-DE-03': { host: 'vps3.justtechservices.xyz', ssh: 22, wss: 443, slowdns: 53 },
+  'VPS-CM-01': { host: configuredDefaultServerHost(), ssh: 22, wss: 443, slowdns: 53 },
+  'VPS-FR-02': { host: process.env.JTS_VPS_FR_HOST || '', ssh: 22, wss: 443, slowdns: 53 },
+  'VPS-DE-03': { host: process.env.JTS_VPS_DE_HOST || '', ssh: 22, wss: 443, slowdns: 53 },
 };
 
 function computeQuotaSnapshot(totalGbRaw: number, usedGbRaw: number): CloudQuotaSnapshot {
