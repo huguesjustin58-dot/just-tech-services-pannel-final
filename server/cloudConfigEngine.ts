@@ -337,8 +337,8 @@ export class CloudConfigEngine {
       };
     }
 
-    const part1 = crypto.randomBytes(2).toString('hex').toUpperCase();
-    const part2 = crypto.randomBytes(2).toString('hex').toUpperCase();
+    const part1 = crypto.randomBytes(4).toString('hex').toUpperCase();
+    const part2 = crypto.randomBytes(4).toString('hex').toUpperCase();
     const code = `JTS-CLD-${part1}-${part2}`;
     const exchangeToken = `jts_tok_${crypto.randomBytes(18).toString('hex')}`;
     const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_MS).toISOString();
@@ -463,28 +463,31 @@ export class CloudConfigEngine {
       };
     }
 
-    if (options?.token) {
-      const tokenBuf = Buffer.from(options.token);
-      const expectedBuf = Buffer.from(entry.exchangeToken);
-      if (
-        tokenBuf.length !== expectedBuf.length ||
-        !crypto.timingSafeEqual(tokenBuf, expectedBuf)
-      ) {
-        return {
-          ok: false,
-          status: 403,
-          code: 'INVALID_EXCHANGE_TOKEN',
-          error: "Jeton d'échange Cloud invalide.",
-        };
-      }
-      if (new Date(entry.tokenExpiresAt).getTime() <= Date.now()) {
-        return {
-          ok: false,
-          status: 410,
-          code: 'EXCHANGE_TOKEN_EXPIRED',
-          error: "Le jeton d'échange temporaire a expiré. Régénérez un lien depuis le portail.",
-        };
-      }
+    if (!options?.token) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'INVALID_EXCHANGE_TOKEN',
+        error: "Jeton d'échange Cloud requis.",
+      };
+    }
+    const tokenBuf = Buffer.from(options.token);
+    const expectedBuf = Buffer.from(entry.exchangeToken);
+    if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'INVALID_EXCHANGE_TOKEN',
+        error: "Jeton d'échange Cloud invalide.",
+      };
+    }
+    if (new Date(entry.tokenExpiresAt).getTime() <= Date.now()) {
+      return {
+        ok: false,
+        status: 410,
+        code: 'EXCHANGE_TOKEN_EXPIRED',
+        error: "Le jeton d'échange temporaire a expiré. Régénérez un lien depuis le portail.",
+      };
     }
 
     if (new Date(entry.expiresAt).getTime() <= Date.now()) {
@@ -591,7 +594,7 @@ export class CloudConfigEngine {
   public compilePrivateNpvt(
     code: string,
     rawPrototype: string,
-    token?: string
+    token: string
   ):
     | { ok: true; filename: string; content: string }
     | { ok: false; status: number; error: string } {
@@ -600,12 +603,13 @@ export class CloudConfigEngine {
       return { ok: false, status: 404, error: 'Code Cloud introuvable ou révoqué.' };
     }
 
-    if (token) {
-      const tBuf = Buffer.from(token);
-      const eBuf = Buffer.from(entry.exchangeToken);
-      if (tBuf.length !== eBuf.length || !crypto.timingSafeEqual(tBuf, eBuf)) {
-        return { ok: false, status: 403, error: "Jeton de téléchargement .npvt invalide." };
-      }
+    const tBuf = Buffer.from(token);
+    const eBuf = Buffer.from(entry.exchangeToken);
+    if (tBuf.length !== eBuf.length || !crypto.timingSafeEqual(tBuf, eBuf)) {
+      return { ok: false, status: 403, error: "Jeton de téléchargement .npvt invalide." };
+    }
+    if (new Date(entry.tokenExpiresAt).getTime() <= Date.now()) {
+      return { ok: false, status: 410, error: "Jeton de téléchargement .npvt expiré." };
     }
 
     const quota = computeQuotaSnapshot(entry.quotaTotalGb, entry.quotaUsedGb);
