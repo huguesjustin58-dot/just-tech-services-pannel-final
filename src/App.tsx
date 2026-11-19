@@ -419,6 +419,7 @@ export default function App() {
           <>
             {routeZone === 'client' && (
               <ClientWorkspace
+                currentUser={authUser}
                 npvPrototype={npvPrototype}
                 latestCloudCode={cloudCodes.find((c) => c.status !== 'Révoqué') ?? null}
                 onGenerateCloudCode={handleGenerateCloudCode}
