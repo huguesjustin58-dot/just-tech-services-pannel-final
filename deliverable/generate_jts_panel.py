@@ -1463,11 +1463,20 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        $adminEmail = (string) env('JTS_SUPERADMIN_EMAIL', '');
+        $adminPassword = (string) env('JTS_SUPERADMIN_PASSWORD', '');
+
+        if (!filter_var($adminEmail, FILTER_VALIDATE_EMAIL) || strlen($adminPassword) < 16) {
+            throw new \\RuntimeException(
+                'Set JTS_SUPERADMIN_EMAIL and a 16+ character JTS_SUPERADMIN_PASSWORD before seeding the panel.',
+            );
+        }
+
         User::firstOrCreate(
-            ['email' => 'superadmin@justtechservices.xyz'],
+            ['email' => $adminEmail],
             [
                 'name' => 'Super Admin JTS',
-                'password' => Hash::make('ChangeMeStrong!2026'),
+                'password' => Hash::make($adminPassword),
                 'role' => UserRole::SUPER_ADMIN,
                 'is_active' => true,
             ],
