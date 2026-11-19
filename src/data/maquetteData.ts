@@ -12,11 +12,11 @@ import {
 } from '../types/panel';
 
 export const PAYMENT_ACCOUNTS = {
-  mtnBeneficiary: 'Sidonie Fouda',
-  mtnNumber: '+237 681057710',
-  orangeBeneficiary: 'CELINE TSEGUI FOPA',
-  orangeNumber: '+237 698057856',
-  orangeMerchantOmAsso: '1017614',
+  mtnBeneficiary: '',
+  mtnNumber: '',
+  orangeBeneficiary: '',
+  orangeNumber: '',
+  orangeMerchantOmAsso: '',
 };
 
 export const PLANS: PlanOffer[] = [
@@ -142,7 +142,7 @@ export const INITIAL_SERVERS: ServerNode[] = [
     code: 'VPS-CM-01',
     name: 'Nœud Principal Ubuntu',
     hostname: 'vps1.justtechservices.xyz',
-    publicIp: '194.163.142.88',
+    publicIp: '',
     sshPort: 22,
     wssPort: 443,
     slowDnsPort: 53,
