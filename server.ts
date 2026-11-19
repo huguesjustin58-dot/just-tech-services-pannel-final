@@ -91,23 +91,32 @@ const serverCreditTransactions: ServerCreditTransaction[] = [];
 const serverPartnerGbBalances = new Map<string, number>();
 const serverCreditIdempotency = new Map<string, ServerCreditTransaction>();
 
+const defaultTunnelHost = process.env.JTS_DEFAULT_SERVER_HOST || (() => {
+  try {
+    return new URL(process.env.APP_URL || '').hostname;
+  } catch {
+    return '';
+  }
+})();
+const defaultSlowDnsNs = process.env.JTS_SLOWDNS_NS_DOMAIN || '';
+const defaultSlowDnsPubKey = process.env.JTS_SLOWDNS_PUBKEY || '';
+
 let activeNpvPrototypeJson = JSON.stringify(
   {
     name: 'JUST TECH SERVICES TUNNEL VIP',
     connectionMode: 'SSH_WSS_SLOWDNS',
-    sshHost: 'vps1.justtechservices.xyz',
+    sshHost: defaultTunnelHost,
     sshPort: 22,
     wssPort: 443,
     sshUsername: '{{SSH_USERNAME}}',
     sshPassword: '{{SSH_PASSWORD}}',
-    sni: 'cdn.justtechservices.xyz',
-    payload:
-      'GET wss://cdn.justtechservices.xyz/wss HTTP/1.1[crlf]Host: vps1.justtechservices.xyz[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]',
+    sni: process.env.JTS_DEFAULT_SNI || defaultTunnelHost,
+    payload: `GET wss://${process.env.JTS_DEFAULT_SNI || defaultTunnelHost}/wss HTTP/1.1[crlf]Host: ${defaultTunnelHost}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]`,
     slowDns: {
-      enabled: true,
+      enabled: Boolean(defaultSlowDnsNs && defaultSlowDnsPubKey),
       dnsServer: '8.8.8.8:53',
-      nameserver: 'sdns1.justtechservices.xyz',
-      publicKey: '7f8b41c2e9a014d58b22e7c3a1f098e6d3b14a7c8f21e09b',
+      nameserver: defaultSlowDnsNs,
+      publicKey: defaultSlowDnsPubKey,
     },
     generator: 'JUST TECH SERVICES AI COMPILER',
   },
