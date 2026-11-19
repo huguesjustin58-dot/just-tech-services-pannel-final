@@ -76,7 +76,7 @@ export type ResolveCloudResult =
       revokedAt?: string | null;
     };
 
-const CLOUD_CODE_REGEX = /^JTS-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+const CLOUD_CODE_REGEX = /^JTS-[A-F0-9]{8}-[A-F0-9]{8}$/;
 
 const ROLE_MAX_QUOTA_GB: Record<SessionRole, number | null> = {
   super_admin: null,
@@ -88,8 +88,8 @@ const ROLE_MAX_QUOTA_GB: Record<SessionRole, number | null> = {
 };
 
 function generateShortCloudCode(): string {
-  const seg1 = crypto.randomBytes(2).toString('hex').toUpperCase();
-  const seg2 = crypto.randomBytes(2).toString('hex').toUpperCase();
+  const seg1 = crypto.randomBytes(4).toString('hex').toUpperCase();
+  const seg2 = crypto.randomBytes(4).toString('hex').toUpperCase();
   return `JTS-${seg1}-${seg2}`;
 }
 
@@ -120,7 +120,9 @@ export class SshCloudConfigRegistry {
   private readonly codeByConfigId = new Map<string, string>();
 
   constructor() {
-    void this.seedInitialRecords();
+    if (process.env.NODE_ENV !== 'production') {
+      void this.seedInitialRecords();
+    }
   }
 
   private async seedInitialRecords(): Promise<void> {
