@@ -1,0 +1,53 @@
+name: Provision Secondary VPN Node on VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      node_host:
+        description: "Adresse IP ou domaine du VPS Nœud VPN (laisser vide pour utiliser VPS_HOST)"
+        required: false
+        default: ""
+        type: string
+      slowdns_ns_domain:
+        description: "Sous-domaine NS SlowDNS (ex: sdns1.justtechservices.xyz)"
+        required: false
+        default: "sdns1.justtechservices.xyz"
+        type: string
+
+jobs:
+  provision-vpn-node:
+    name: Provision Multi-Protocol VPN Stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Upload & Run VPN Node Provisioner over SSH
+        env:
+          TARGET_HOST: ${{ github.event.inputs.node_host || secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          SLOWDNS_NS: ${{ github.event.inputs.slowdns_ns_domain || 'sdns1.justtechservices.xyz' }}
+        run: |
+          if [[ -z "${TARGET_HOST}" || -z "${VPS_SSH_KEY}" ]]; then
+            echo "::error::Veuillez renseigner VPS_HOST (ou node_host) et VPS_SSH_KEY dans les secrets GitHub."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "${VPS_SSH_KEY}" > ~/.ssh/jts_vpn_node_key
+          chmod 600 ~/.ssh/jts_vpn_node_key
+
+          scp -i ~/.ssh/jts_vpn_node_key -P "${VPS_PORT}" -o StrictHostKeyChecking=no \
+            deliverable/deploy-scripts/vps-provision-vpn-node.sh \
+            deliverable/deploy-scripts/setup-slowdns.sh \
+            "${VPS_USER}@${TARGET_HOST}:/tmp/"
+
+          ssh -i ~/.ssh/jts_vpn_node_key -p "${VPS_PORT}" -o StrictHostKeyChecking=no "${VPS_USER}@${TARGET_HOST}" \
+            "sudo bash /tmp/vps-provision-vpn-node.sh '${SLOWDNS_NS}' && sudo bash /tmp/setup-slowdns.sh '${SLOWDNS_NS}'"
+
+      - name: 3. Cleanup SSH Key
+        if: always()
+        run: rm -f ~/.ssh/jts_vpn_node_key

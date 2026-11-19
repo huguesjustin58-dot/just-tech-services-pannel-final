@@ -1,0 +1,6 @@
+{
+  "name": "JUST TECH SERVICES PANEL",
+  "description": "Plateforme SaaS de gestion d'abonnements, facturation Mobile Money FCFA et orchestration d'infrastructures réseau privées (SSH, SSH-WSS, SSH SlowDNS).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
