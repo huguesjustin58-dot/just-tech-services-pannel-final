@@ -337,8 +337,8 @@ export class CloudConfigEngine {
       };
     }
 
-    const part1 = crypto.randomBytes(4).toString('hex').toUpperCase();
-    const part2 = crypto.randomBytes(4).toString('hex').toUpperCase();
+    const part1 = crypto.randomBytes(8).toString('hex').toUpperCase();
+    const part2 = crypto.randomBytes(8).toString('hex').toUpperCase();
     const code = `JTS-CLD-${part1}-${part2}`;
     const exchangeToken = `jts_tok_${crypto.randomBytes(18).toString('hex')}`;
     const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_MS).toISOString();
