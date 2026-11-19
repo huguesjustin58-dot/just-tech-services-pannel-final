@@ -322,6 +322,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
       // Paiement validé ! Passage au composant de sélection d'OS (Android / iPhone)
       setSelectedPlan(checkoutPlan);
       setDeliveryToken(data.deliveryToken ?? null);
+      setActiveCloudBundle(data.cloudRecord ?? null);
       setAgentVerdictReason(data.reasoning || 'Paiement validé par l’Agent IA JUST TECH.');
       if (data.sshUsername && data.sshPassword) {
         setSshCredentials({
@@ -444,11 +445,6 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
       setCloudBundleLoading(false);
     }
   };
-
-  useEffect(() => {
-    void handleGenerateRealCloudBundle(selectedPlan, dataUsedGb);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPlan.id]);
 
   const handleSelectPostPaymentOs = async (os: DeliveryPlatform) => {
     setOsGenerating(true);
@@ -915,21 +911,23 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
         </button>
       </section>
 
-      {/* Générateur de Configurations Cloud connecté aux pass et quotas clients réels (Zéro secret en QR / lien public) */}
-      <CloudConfigGeneratorCard
-        bundle={activeCloudBundle}
-        loading={cloudBundleLoading}
-        error={cloudBundleError}
-        planName={`${selectedPlan.name} (${selectedPlan.durationLabel})`}
-        quotaTotalGb={selectedPlan.dataQuotaGb ?? 3}
-        quotaUsedGb={dataUsedGb}
-        maxSessions={selectedPlan.maxSessions}
-        npvPrototype={npvPrototype}
-        onGenerateBundle={() => handleGenerateRealCloudBundle()}
-        onDownloadNpvt={handleDownloadPrivateNpvt}
-        onCopy={copyValue}
-        copiedKey={copiedKey}
-      />
+      {/* Affiche uniquement la configuration réellement délivrée après validation. */}
+      {activeCloudBundle && (
+        <CloudConfigGeneratorCard
+          bundle={activeCloudBundle}
+          loading={cloudBundleLoading}
+          error={cloudBundleError}
+          planName={activeCloudBundle.planName}
+          quotaTotalGb={activeCloudBundle.quota.totalGb}
+          quotaUsedGb={activeCloudBundle.quota.usedGb}
+          maxSessions={activeCloudBundle.maxSessions}
+          npvPrototype={npvPrototype}
+          onGenerateBundle={() => handleGenerateRealCloudBundle()}
+          onDownloadNpvt={handleDownloadPrivateNpvt}
+          onCopy={copyValue}
+          copiedKey={copiedKey}
+        />
+      )}
 
       {/* MODAL CHECKOUT -> VALIDATION AGENT IA -> COMPOSANT SELECTION OS (ANDROID / IPHONE) */}
       {checkoutPlan && (
