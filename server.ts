@@ -509,7 +509,7 @@ async function startServer() {
             typeof tx.prototypeJson === 'string' && tx.prototypeJson.length > 0
               ? tx.prototypeJson
               : activeNpvPrototypeJson;
-          const compiled = cloudEngine.compilePrivateNpvt(issued.bundle.code, activeProto);
+          const compiled = cloudEngine.compilePrivateNpvt(issued.bundle.code, activeProto, issued.bundle.exchangeToken);
           if (compiled.ok) {
             npvFileContent = compiled.content;
             npvFilename = compiled.filename;
@@ -830,6 +830,10 @@ async function startServer() {
         ? req.body.prototypeJson
         : activeNpvPrototypeJson;
 
+    if (!token) {
+      res.status(401).json({ status: 'error', error: "Jeton d'échange requis." });
+      return;
+    }
     const compiled = cloudEngine.compilePrivateNpvt(code, rawProto, token);
     if (!compiled.ok) {
       res.status(compiled.status).json({ status: 'error', error: compiled.error });
@@ -1351,7 +1355,7 @@ const pendingDeliveriesStore = new Map<string, PendingDelivery>();
       typeof req.body?.prototypeJson === 'string' && req.body.prototypeJson.length > 0
         ? req.body.prototypeJson
         : activeNpvPrototypeJson;
-    const compiled = cloudEngine.compilePrivateNpvt(pending.cloudRecord.code, activeProto);
+    const compiled = cloudEngine.compilePrivateNpvt(pending.cloudRecord.code, activeProto, pending.cloudRecord.exchangeToken);
     if (!compiled.ok) {
       res.status(compiled.status).json({ error: compiled.error });
       return;
