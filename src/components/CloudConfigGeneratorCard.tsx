@@ -76,15 +76,17 @@ export const CloudConfigGeneratorCard: React.FC<CloudConfigGeneratorCardProps> =
             <ShieldCheck className="w-3.5 h-3.5" />
             Zéro mot de passe / clé privée (cloud_code + import_token révocable)
           </span>
-          <button
-            type="button"
-            disabled={loading || quotaExhausted}
-            onClick={() => void onGenerateBundle()}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#E5B84B] hover:bg-[#D4A136] disabled:opacity-50 text-[#070B14] text-xs font-semibold cursor-pointer transition-colors"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            {bundle ? 'Régénérer la config Cloud' : 'Générer ma config Cloud'}
-          </button>
+          {!bundle && (
+            <button
+              type="button"
+              disabled={loading || quotaExhausted}
+              onClick={() => void onGenerateBundle()}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#E5B84B] hover:bg-[#D4A136] disabled:opacity-50 text-[#070B14] text-xs font-semibold cursor-pointer transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Générer ma config Cloud
+            </button>
+          )}
         </div>
       </div>
 
