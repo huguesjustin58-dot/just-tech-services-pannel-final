@@ -51,7 +51,7 @@ if [[ -n "$BOOTSTRAP_DIR" ]]; then
   trap 'rm -f "$BOOTSTRAP_DIR/admin-email.b64" "$BOOTSTRAP_DIR/admin-password.b64"; rmdir "$BOOTSTRAP_DIR" 2>/dev/null || true' EXIT
 fi
 
-[[ "$SUPERADMIN_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$ ]] || fail "JTS_SUPERADMIN_EMAIL invalide ou manquant."
+[[ "$SUPERADMIN_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || fail "JTS_SUPERADMIN_EMAIL invalide ou manquant."
 [[ ${#SUPERADMIN_PASSWORD} -ge 16 && "$SUPERADMIN_PASSWORD" =~ ^[A-Za-z0-9_-]+$ ]] || fail "JTS_SUPERADMIN_PASSWORD doit faire 16 caractères minimum (lettres, chiffres, _ ou -)."
 
 
