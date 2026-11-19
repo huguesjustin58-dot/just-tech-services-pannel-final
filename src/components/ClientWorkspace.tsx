@@ -506,47 +506,19 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
           );
           return;
         }
+        notify('Le serveur n’a pas retourné le pass attendu. Recommencez la vérification.');
+        return;
       } else {
         const errData = (await res.json().catch(() => ({}))) as { error?: string };
         notify(errData.error || 'Génération refusée par le serveur.');
         return;
       }
     } catch {
-      // Fallback local si serveur momentané indisponible pour la génération de fichier
+      notify('Impossible de délivrer le pass depuis le serveur. Réessayez après avoir vérifié votre paiement.');
     } finally {
       setOsGenerating(false);
     }
-
-    if (os === 'android') {
-      const created = onGenerateCloudCode(
-        'Franck Mbarga',
-        `${selectedPlan.name} (${selectedPlan.durationLabel})`,
-        sshCredentials.username
-      );
-      setActiveCloudCode(created);
-      notify(
-        `Clé Cloud Android ${created.code} générée ! Activez-la avec internet dans l'application.`
-      );
-    } else {
-      const compiled = compileNpvFromPrototype(
-        npvPrototype.rawTemplateJson,
-        sshCredentials.username,
-        sshCredentials.password,
-        'Franck Mbarga'
-      );
-      const blob = new Blob([compiled], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `justtech-${sshCredentials.username}-iphone.npvt`;
-      a.click();
-      URL.revokeObjectURL(url);
-      notify(
-        `Fichier .npvt iPhone généré depuis le prototype avec vos identifiants (${sshCredentials.username}).`
-      );
-    }
   };
-
   const handleSendAgentMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = agentInput.trim();
