@@ -1,38 +1,33 @@
-name: Deploy JUST TECH SERVICES Panel & VPN to VPS
+name: Deploy JUST TECH SERVICES Panel to VPS
 
 on:
-  push:
-    branches:
-      - main
-      - master
   workflow_dispatch:
     inputs:
       panel_domain:
-        description: "Nom de domaine du Panel (ex: panel.justtechservices.xyz) — prioritaire sur le secret JTS_PANEL_DOMAIN"
+        description: "Panel domain (or leave blank to use VPS_HOST)"
         required: false
         default: ""
         type: string
       slowdns_ns_domain:
-        description: "Sous-domaine NS SlowDNS (ex: sdns1.justtechservices.xyz)"
+        description: "SlowDNS nameserver domain"
         required: false
         default: ""
         type: string
       deploy_vpn_stack:
-        description: "Provisionner / mettre à jour la stack VPN (SSH, WS Proxy, Stunnel4, BadVPN 7300, SlowDNS 5300)"
-        required: false
-        default: "true"
+        description: "Install/update the VPN stack"
+        required: true
+        default: "false"
         type: choice
-        options:
-          - "true"
-          - "false"
+        options: ["false", "true"]
       enable_ssl:
-        description: "Activer automatiquement le certificat HTTPS Let's Encrypt (Certbot Nginx + Stunnel4 TLS)"
-        required: false
+        description: "Enable Let's Encrypt TLS for a domain"
+        required: true
         default: "true"
         type: choice
-        options:
-          - "true"
-          - "false"
+        options: ["true", "false"]
+
+permissions:
+  contents: read
 
 concurrency:
   group: jts-vps-production-deploy
@@ -40,98 +35,117 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    name: Build Panel & Provision VPN on VPS (Domain + HTTPS & SlowDNS)
+    name: Build and deploy the panel
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 45
     steps:
-      - name: 1. Checkout Repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: 2. Setup Node.js 20 LTS
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: "22"
 
-      - name: 3. Install Dependencies
-        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
 
-      - name: 4. TypeScript Verification & Production Build
+      - name: Install dependencies and verify the project
         run: |
-          npm run lint
-          npm run build
+          bun install --frozen-lockfile
+          bun run lint
+          bun run build
 
-      - name: 5. Package Release Archive (jts-release.tar.gz)
-        run: |
-          chmod +x deliverable/deploy-scripts/*.sh
-          tar -czf /tmp/jts-release.tar.gz \
-            --exclude='node_modules' \
-            --exclude='.git' \
-            --exclude='deliverable/dist' \
-            dist \
-            server.ts \
-            server \
-            src \
-            public \
-            index.html \
-            package.json \
-            package-lock.json \
-            tsconfig.json \
-            vite.config.ts \
-            metadata.json \
-            .env.example \
-            deliverable/deploy-scripts
-          ls -lh /tmp/jts-release.tar.gz
-
-      - name: 6. Validate VPS SSH Secrets
+      - name: Validate VPS connection and administrator settings
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+          JTS_SUPERADMIN_EMAIL: ${{ secrets.JTS_SUPERADMIN_EMAIL }}
+          JTS_SUPERADMIN_PASSWORD: ${{ secrets.JTS_SUPERADMIN_PASSWORD }}
+          PANEL_DOMAIN: ${{ inputs.panel_domain || vars.JTS_PANEL_DOMAIN || secrets.VPS_HOST }}
         run: |
-          if [[ -z "${VPS_HOST}" || -z "${VPS_SSH_KEY}" ]]; then
-            echo "::error::Secrets GitHub manquants : configurez VPS_HOST et VPS_SSH_KEY dans Settings -> Secrets and variables -> Actions."
-            exit 1
-          fi
+          set -euo pipefail
+          for name in VPS_HOST VPS_SSH_KEY VPS_KNOWN_HOSTS JTS_SUPERADMIN_EMAIL JTS_SUPERADMIN_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required Actions secret is missing: ${name}"
+              exit 1
+            fi
+          done
+          [[ "$VPS_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "::error::VPS_HOST is invalid."; exit 1; }
+          [[ "$VPS_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::VPS_USER is invalid."; exit 1; }
+          [[ "$VPS_PORT" =~ ^[0-9]{1,5}$ ]] && (( VPS_PORT >= 1 && VPS_PORT <= 65535 )) || { echo "::error::VPS_PORT is invalid."; exit 1; }
+          [[ "$VPS_KNOWN_HOSTS" == *"$VPS_HOST"* ]] || { echo "::error::VPS_KNOWN_HOSTS must contain the configured host."; exit 1; }
+          [[ "$JTS_SUPERADMIN_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || { echo "::error::JTS_SUPERADMIN_EMAIL is invalid."; exit 1; }
+          [[ "${#JTS_SUPERADMIN_PASSWORD}" -ge 16 && "$JTS_SUPERADMIN_PASSWORD" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "::error::Use a 16+ character password containing only letters, numbers, underscore, or hyphen."; exit 1; }
+          [[ "$PANEL_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "::error::Panel domain is invalid."; exit 1; }
 
-      - name: 7. Prepare SSH Key & Upload Release Archive to VPS
+      - name: Prepare release, SSH trust, and temporary bootstrap files
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          JTS_SUPERADMIN_EMAIL: ${{ secrets.JTS_SUPERADMIN_EMAIL }}
+          JTS_SUPERADMIN_PASSWORD: ${{ secrets.JTS_SUPERADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/jts_vps_key"
+          chmod 600 "$HOME/.ssh/jts_vps_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+          mkdir -m 700 -p "$RUNNER_TEMP/jts-deploy/bootstrap"
+          git archive --format=tar.gz --prefix=JUST_TECH_SERVICES_PANEL_FINAL/ "$GITHUB_SHA" > "$RUNNER_TEMP/jts-deploy/release.tar.gz"
+          printf '%s' "$JTS_SUPERADMIN_EMAIL" | base64 -w 0 > "$RUNNER_TEMP/jts-deploy/bootstrap/admin-email.b64"
+          printf '%s' "$JTS_SUPERADMIN_PASSWORD" | base64 -w 0 > "$RUNNER_TEMP/jts-deploy/bootstrap/admin-password.b64"
+          chmod 600 "$RUNNER_TEMP/jts-deploy/bootstrap/"*
+
+      - name: Upload release and bootstrap files
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER || 'root' }}
           VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "${VPS_SSH_KEY}" > ~/.ssh/jts_vps_key
-          chmod 600 ~/.ssh/jts_vps_key
-          ssh-keyscan -p "${VPS_PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null
+          set -euo pipefail
+          REMOTE_DIR="/tmp/jts-panel-$GITHUB_SHA"
+          ssh -i "$HOME/.ssh/jts_vps_key" -p "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$VPS_USER@$VPS_HOST" "mkdir -m 700 -p '$REMOTE_DIR'"
+          scp -i "$HOME/.ssh/jts_vps_key" -P "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$RUNNER_TEMP/jts-deploy/release.tar.gz" \
+            "$VPS_USER@$VPS_HOST:$REMOTE_DIR/"
+          scp -i "$HOME/.ssh/jts_vps_key" -P "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -r \
+            "$RUNNER_TEMP/jts-deploy/bootstrap" \
+            "$VPS_USER@$VPS_HOST:$REMOTE_DIR/"
 
-          scp -i ~/.ssh/jts_vps_key -P "${VPS_PORT}" -o StrictHostKeyChecking=no \
-            /tmp/jts-release.tar.gz \
-            deliverable/deploy-scripts/vps-deploy-panel-and-vpn.sh \
-            "${VPS_USER}@${VPS_HOST}:/tmp/"
-
-      - name: 8. Execute Remote Panel + VPN Provisioning on VPS (Domain + HTTPS)
+      - name: Install panel on the VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER || 'root' }}
           VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
-          JTS_PANEL_DOMAIN: ${{ github.event.inputs.panel_domain || secrets.JTS_PANEL_DOMAIN || secrets.VPS_HOST }}
-          JTS_SLOWDNS_NS_DOMAIN: ${{ github.event.inputs.slowdns_ns_domain || secrets.JTS_SLOWDNS_NS_DOMAIN || 'sdns1.justtechservices.xyz' }}
-          JTS_SUPERADMIN_EMAIL: ${{ secrets.JTS_SUPERADMIN_EMAIL || 'huguesjustin58@gmail.com' }}
-          JTS_SUPERADMIN_PASSWORD: ${{ secrets.JTS_SUPERADMIN_PASSWORD || '@Moddingjust' }}
-          JTS_DEPLOY_VPN_STACK: ${{ github.event.inputs.deploy_vpn_stack || 'true' }}
-          JTS_ENABLE_SSL: ${{ github.event.inputs.enable_ssl || 'true' }}
+          PANEL_DOMAIN: ${{ inputs.panel_domain || vars.JTS_PANEL_DOMAIN || secrets.VPS_HOST }}
+          SLOWDNS_NS_DOMAIN: ${{ inputs.slowdns_ns_domain || vars.JTS_SLOWDNS_NS_DOMAIN || 'sdns1.justtechservices.xyz' }}
+          DEPLOY_VPN_STACK: ${{ inputs.deploy_vpn_stack || 'false' }}
+          ENABLE_SSL: ${{ inputs.enable_ssl || 'true' }}
         run: |
-          ssh -i ~/.ssh/jts_vps_key -p "${VPS_PORT}" -o StrictHostKeyChecking=no "${VPS_USER}@${VPS_HOST}" \
-            "sudo JTS_PANEL_DOMAIN='${JTS_PANEL_DOMAIN}' \
-                  JTS_SLOWDNS_NS_DOMAIN='${JTS_SLOWDNS_NS_DOMAIN}' \
-                  JTS_SUPERADMIN_EMAIL='${JTS_SUPERADMIN_EMAIL}' \
-                  JTS_SUPERADMIN_PASSWORD='${JTS_SUPERADMIN_PASSWORD}' \
-                  JTS_DEPLOY_VPN_STACK='${JTS_DEPLOY_VPN_STACK}' \
-                  JTS_ENABLE_SSL='${JTS_ENABLE_SSL}' \
-                  bash /tmp/vps-deploy-panel-and-vpn.sh /tmp/jts-release.tar.gz"
+          set -euo pipefail
+          [[ "$PANEL_DOMAIN" =~ ^[A-Za-z0-9.-]+$ && "$SLOWDNS_NS_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "::error::A domain value is invalid."; exit 1; }
+          [[ "$DEPLOY_VPN_STACK" == "true" || "$DEPLOY_VPN_STACK" == "false" ]] || { echo "::error::VPN option is invalid."; exit 1; }
+          [[ "$ENABLE_SSL" == "true" || "$ENABLE_SSL" == "false" ]] || { echo "::error::SSL option is invalid."; exit 1; }
+          REMOTE_DIR="/tmp/jts-panel-$GITHUB_SHA"
+          REMOTE_SCRIPT="$REMOTE_DIR/release.tar.gz"
+          ssh -i "$HOME/.ssh/jts_vps_key" -p "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$VPS_USER@$VPS_HOST" \
+            "sudo -n env JTS_INSTALL_DIR='/opt/justtech-panel' JTS_PANEL_DOMAIN='$PANEL_DOMAIN' JTS_SLOWDNS_NS_DOMAIN='$SLOWDNS_NS_DOMAIN' JTS_DEPLOY_VPN_STACK='$DEPLOY_VPN_STACK' JTS_ENABLE_SSL='$ENABLE_SSL' bash -c 'tar -xzf \"$REMOTE_SCRIPT\" -C /tmp; bash /tmp/JUST_TECH_SERVICES_PANEL_FINAL/deliverable/deploy-scripts/vps-deploy-panel-and-vpn.sh \"$REMOTE_SCRIPT\" \"$REMOTE_DIR/bootstrap\"'"
 
-      - name: 9. Cleanup Temporary SSH Key
+      - name: Remove temporary files from VPS and runner
         if: always()
-        run: rm -f ~/.ssh/jts_vps_key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+        run: |
+          if [[ -n "${VPS_HOST:-}" ]]; then
+            REMOTE_DIR="/tmp/jts-panel-$GITHUB_SHA"
+            ssh -i "$HOME/.ssh/jts_vps_key" -p "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$VPS_USER@$VPS_HOST" "rm -rf '$REMOTE_DIR' /tmp/JUST_TECH_SERVICES_PANEL_FINAL" || true
+          fi
+          rm -rf "$RUNNER_TEMP/jts-deploy" "$HOME/.ssh/jts_vps_key"
