@@ -51,7 +51,7 @@ const OFFICIAL_PLANS: PlanCatalogItem[] = [
   { id: 'free-test-3gb', category: 'OFFRE TEST GRATUIT', name: 'Test Gratuit 3 Go', priceFcfa: 0, durationLabel: '2 heures', durationHours: 2, dataQuotaGb: 3, maxSessions: 1 },
 ];
 
-function resolvePhoneNumber(envVal: string | undefined, fallback: string): string {
+function resolvePhoneNumber(envVal: string | undefined, fallback = ''): string {
   if (!envVal) return fallback;
   const digits = envVal.replace(/\D/g, '');
   return digits.length >= 6 ? envVal : fallback;
@@ -59,13 +59,13 @@ function resolvePhoneNumber(envVal: string | undefined, fallback: string): strin
 
 // État serveur autoritaire des passerelles Mobile Money, plafond Orange, codes Cloud et anti-abus Test Gratuit
 const paymentGatewayState = {
-  mtnBeneficiary: process.env.MTN_MOMO_BENEFICIARY || 'Sidonie Fouda',
-  mtnNumber: resolvePhoneNumber(process.env.MTN_MOMO_NUMBER, '+237 681057710'),
-  orangeBeneficiary: process.env.ORANGE_MONEY_BENEFICIARY || 'CELINE TSEGUI FOPA',
-  orangeNumber: resolvePhoneNumber(process.env.ORANGE_MONEY_NUMBER, '+237 698057856'),
-  orangeMerchantOmAsso: process.env.ORANGE_MERCHANT_OM_ASSO || '1017614',
-  orangeCeilingFcfa: Number(process.env.ORANGE_MONTHLY_CEILING_FCFA || 1500000),
-  orangeCurrentVolumeFcfa: 1180000,
+  mtnBeneficiary: process.env.MTN_MOMO_BENEFICIARY || '',
+  mtnNumber: resolvePhoneNumber(process.env.MTN_MOMO_NUMBER),
+  orangeBeneficiary: process.env.ORANGE_MONEY_BENEFICIARY || '',
+  orangeNumber: resolvePhoneNumber(process.env.ORANGE_MONEY_NUMBER),
+  orangeMerchantOmAsso: process.env.ORANGE_MERCHANT_OM_ASSO || '',
+  orangeCeilingFcfa: Math.max(0, Number(process.env.ORANGE_MONTHLY_CEILING_FCFA || 1500000)),
+  orangeCurrentVolumeFcfa: Math.max(0, Number(process.env.ORANGE_CURRENT_VOLUME_FCFA || 0)),
   orangeCeilingReachedManual: false,
 };
 
