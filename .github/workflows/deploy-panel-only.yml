@@ -1,6 +1,9 @@
 name: Deploy JUST TECH SERVICES Panel (keep VPN untouched)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       panel_url:
