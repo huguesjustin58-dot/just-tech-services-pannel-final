@@ -535,6 +535,49 @@ export class RbacAuthService {
     return { ok: true, user: this.toPublicUser(record), token };
   }
 
+  public registerClient(input: { name: string; email: string; password: string }):
+    | { ok: true; user: PublicUserRecord }
+    | { ok: false; status: number; error: string } {
+    const cleanName = input.name.trim();
+    const cleanEmail = input.email.trim().toLowerCase();
+    if (!cleanName || !cleanEmail.includes('@') || input.password.length < 8) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Nom, adresse e-mail valide et mot de passe (8 caractères minimum) requis.',
+      };
+    }
+    if (this.findUserByEmail(cleanEmail)) {
+      return { ok: false, status: 409, error: 'Un compte existe déjà avec cette adresse e-mail.' };
+    }
+
+    const id = `usr-${crypto.randomBytes(5).toString('hex')}`;
+    const { salt, hash } = hashPassword(input.password);
+    const created: InternalUserRecord = {
+      id,
+      name: cleanName,
+      email: cleanEmail,
+      role: 'client',
+      salt,
+      passwordHash: hash,
+      isActive: true,
+      mustChangePassword: false,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: null,
+    };
+    this.users.set(id, created);
+    this.persistState();
+    this.recordAudit({
+      actorEmail: cleanEmail,
+      actorRole: 'client',
+      action: 'auth.client_registered',
+      target: cleanEmail,
+      outcome: 'ALLOWED',
+      detail: 'Compte client créé depuis le portail public.',
+    });
+    return { ok: true, user: this.toPublicUser(created) };
+  }
+
   public createUser(
     actor: PublicUserRecord,
     input: { name: string; email: string; password: string; role: SessionRole }
