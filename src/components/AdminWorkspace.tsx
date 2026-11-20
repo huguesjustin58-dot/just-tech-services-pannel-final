@@ -148,12 +148,37 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
   const [resellers, setResellers] = useState<ResellerAccount[]>(RESELLERS);
   const [servers, setServers] = useState<ServerNode[]>(INITIAL_SERVERS);
   const [tickets, setTickets] = useState<SupportTicket[]>(INITIAL_TICKETS);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([
-    { id: 'aud-1', event: 'license.provisioned', detail: 'jts_fmbarga92 · VPS-CM-01 · OK', level: 'ok', timestamp: '18/11 09:44' },
-    { id: 'aud-2', event: 'quota.threshold_100', detail: 'jts_btchou41 · Verrouillé OS', level: 'warn', timestamp: '18/11 11:12' },
-    { id: 'aud-3', event: 'payment.verified', detail: 'LEDGER-90482 · 7 800 FCFA', level: 'ok', timestamp: '18/11 12:08' },
-    { id: 'aud-4', event: 'dns.cloudflare.sync', detail: 'sdns1.justtechservices.xyz · NS OK', level: 'info', timestamp: '18/11 13:00' },
-  ]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [registeredClientCount, setRegisteredClientCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const loadRegisteredClients = async () => {
+      try {
+        const response = await authFetch('/api/admin/users', { cache: 'no-store' });
+        if (!response.ok) {
+          if (active) setRegisteredClientCount(null);
+          return;
+        }
+        const payload = (await response.json()) as {
+          users?: { role: string; isActive?: boolean }[];
+        };
+        const count = (payload.users ?? []).filter(
+          (user) => user.role === 'client' && user.isActive !== false
+        ).length;
+        if (active) setRegisteredClientCount(count);
+      } catch {
+        if (active) setRegisteredClientCount(null);
+      }
+    };
+
+    void loadRegisteredClients();
+    const timer = window.setInterval(() => void loadRegisteredClients(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const [protoName, setProtoName] = useState(npvPrototype.name);
   const [protoExt, setProtoExt] = useState<'.npvt' | '.json'>(npvPrototype.fileExtension);
@@ -342,11 +367,12 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
   }, [invoices, invoiceStatusFilter, invoiceMethodFilter, invoiceSearch]);
 
   const activeLicensesCount = licenses.filter((l) => l.status === 'Active').length;
-  const totalSessions = licenses.reduce((sum, l) => sum + l.activeSessions, 0);
   const pendingPaymentsCount = payments.filter(
     (p) => p.status === 'Déclaré' || p.status === 'En vérification'
   ).length;
-  const monthlyRevenue = 1354000;
+  const recordedRevenue = invoices
+    .filter((invoice) => invoice.status === 'Payée')
+    .reduce((total, invoice) => total + invoice.amountFcfa, 0);
 
   const updateLicenseStatus = (id: string, nextStatus: LicenseStatus, actionLabel: string) => {
     const target = licenses.find((l) => l.id === id);
@@ -866,8 +892,8 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
             <span className="text-[#45D7F4] font-mono-tabular">HMAC-SHA256</span>
           </div>
           <div className="flex items-center justify-between">
-            <span>Capacité cible</span>
-            <span className="text-[#F2F6FF] font-mono-tabular">1 000+ clients</span>
+            <span>Nœuds enregistrés</span>
+            <span className="text-[#F2F6FF] font-mono-tabular">{servers.length}</span>
           </div>
         </div>
       </aside>
@@ -939,30 +965,34 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
             {/* 4 KPI Strip */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <div className="bg-[#101827] border border-[#243147] rounded-xl p-5">
-                <p className="text-xs text-[#8D9AAF]">Revenus du mois</p>
+                <p className="text-xs text-[#8D9AAF]">Revenus confirmés enregistrés</p>
                 <p className="font-mono-tabular text-2xl font-semibold text-[#E5B84B] mt-2">
-                  {formatFcfa(monthlyRevenue)}
-                </p>
-                <p className="text-xs text-[#45D7F4] mt-2 font-mono-tabular">
-                  +18.4% vs mois précédent
-                </p>
-              </div>
-              <div className="bg-[#101827] border border-[#243147] rounded-xl p-5">
-                <p className="text-xs text-[#8D9AAF]">Licences actives</p>
-                <p className="font-mono-tabular text-2xl font-semibold text-[#F2F6FF] mt-2">
-                  {activeLicensesCount} <span className="text-sm text-[#8D9AAF]">/ {licenses.length}</span>
+                  {formatFcfa(recordedRevenue)}
                 </p>
                 <p className="text-xs text-[#8D9AAF] mt-2">
-                  Capacité indexée : 1 000+ clients
+                  Somme des factures marquées payées
                 </p>
               </div>
               <div className="bg-[#101827] border border-[#243147] rounded-xl p-5">
-                <p className="text-xs text-[#8D9AAF]">Sessions VPN actives</p>
+                <p className="text-xs text-[#8D9AAF]">Comptes clients actifs</p>
                 <p className="font-mono-tabular text-2xl font-semibold text-[#F2F6FF] mt-2">
-                  {343 + totalSessions}
+                  {registeredClientCount === null ? '—' : registeredClientCount}
                 </p>
-                <p className="text-xs text-[#8D9AAF] mt-2 font-mono-tabular">
-                  SSH · SlowDNS · SSH-WSS
+                <p className="text-xs text-[#8D9AAF] mt-2">
+                  {registeredClientCount === null
+                    ? 'Données comptes indisponibles'
+                    : registeredClientCount === 0
+                      ? 'Aucun compte client actif enregistré'
+                      : 'Comptes actifs · synchronisé avec le serveur'}
+                </p>
+              </div>
+              <div className="bg-[#101827] border border-[#243147] rounded-xl p-5">
+                <p className="text-xs text-[#8D9AAF]">Trafic VPN en direct</p>
+                <p className="font-mono-tabular text-2xl font-semibold text-[#F2F6FF] mt-2">
+                  Non mesuré
+                </p>
+                <p className="text-xs text-[#8D9AAF] mt-2">
+                  Aucune source de télémétrie VPN connectée
                 </p>
               </div>
               <div className="bg-[#101827] border border-[#243147] rounded-xl p-5">
@@ -971,7 +1001,7 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                   {pendingPaymentsCount}
                 </p>
                 <p className="text-xs text-[#8D9AAF] mt-2">
-                  MTN MoMo & Orange Money
+                  Aucun paiement en attente enregistré
                 </p>
               </div>
             </div>
@@ -992,7 +1022,11 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                   </div>
 
                   <div className="divide-y divide-[#243147]">
-                    {servers.map((srv) => (
+                    {servers.length === 0 ? (
+                      <p className="py-5 text-sm text-[#8D9AAF]">
+                        Aucun nœud VPN enregistré. Ajoutez un nœud pour afficher son état.
+                      </p>
+                    ) : servers.map((srv) => (
                       <div key={srv.id} className="py-3.5 first:pt-0 last:pb-0 space-y-2">
                         <div className="flex items-center justify-between">
                           <div>
@@ -1339,7 +1373,13 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#243147] text-sm">
-                  {resellers.map((r) => (
+                  {resellers.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-sm text-[#8D9AAF]">
+                        Aucun revendeur enregistré · 0 revendeur.
+                      </td>
+                    </tr>
+                  ) : resellers.map((r) => (
                     <tr key={r.id} className="hover:bg-[#151F31]/60">
                       <td className="py-3.5 px-5">
                         <div className="font-medium text-[#F2F6FF]">{r.name}</div>
@@ -1448,6 +1488,11 @@ export const AdminWorkspace: React.FC<AdminWorkspaceProps> = ({
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {servers.length === 0 && (
+                <div className="xl:col-span-2 rounded-xl border border-[#243147] bg-[#101827] p-6 text-sm text-[#8D9AAF]">
+                  Aucun nœud VPN enregistré. Les mesures CPU, RAM et sessions apparaîtront après l’ajout d’un nœud et une sonde réelle.
+                </div>
+              )}
               {servers.map((srv) => (
                 <div
                   key={srv.id}
