@@ -81,8 +81,8 @@ jobs:
           import secrets
 
           def dotenv_quote(value):
-              value = value.replace("\\r", "").replace("\\n", "")
-              return '"' + value.replace("\\\\", "\\\\\\\\").replace('"', '\\\\"') + '"'
+              value = value.replace("\r", "").replace("\n", "")
+              return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
           host = os.environ["VPS_HOST"]
           panel_url = os.environ.get("PANEL_URL", "").strip() or f"http://{host}:3000"
@@ -98,7 +98,7 @@ jobs:
           if gemini_key:
               lines.append(f"GEMINI_API_KEY={dotenv_quote(gemini_key)}")
           Path(os.environ["RUNNER_TEMP"], "jts-panel", "bootstrap.env").write_text(
-              "\\n".join(lines) + "\\n", encoding="utf-8"
+              "\n".join(lines) + "\n", encoding="utf-8"
           )
           PY
           chmod 600 "$RUNNER_TEMP/jts-panel/bootstrap.env"
@@ -164,7 +164,7 @@ jobs:
           fi
           mkdir -p "$TARGET"
           tar -xzf "$REMOTE_DIR/release.tar.gz" --strip-components=1 -C "$TARGET"
-          if [[ ! -f "$TARGET/.env" ]]; then
+          if [[ ! -f "$TARGET/.env" ]] || ! grep -q '^JTS_SUPERADMIN_EMAIL=' "$TARGET/.env"; then
             install -m 600 "$REMOTE_DIR/bootstrap.env" "$TARGET/.env"
           fi
           cd "$TARGET"
