@@ -157,6 +157,7 @@ export class SshCloudConfigRegistry {
       JSON.stringify({ version: 1, records: Array.from(this.recordsByCode.values()) }, null, 2),
       { encoding: 'utf8', mode: 0o600 }
     );
+    fs.chmodSync(temporaryPath, 0o600);
     fs.renameSync(temporaryPath, this.stateFilePath);
   }
 
