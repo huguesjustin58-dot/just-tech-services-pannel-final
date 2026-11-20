@@ -121,7 +121,7 @@ function persistTunnelUsage(): void {
 }
 
 function cloudConfigExpiresAt(createdAt: string, duration: string | undefined): number | null {
-  const match = typeof duration === 'string' ? duration.trim().match(/^(\\d+)\\s*([dhm])$/i) : null;
+  const match = typeof duration === 'string' ? duration.trim().match(/^(\d+)\s*([dhm])$/i) : null;
   if (!match) return null;
   const amount = Number(match[1]);
   const unitMs = match[2].toLowerCase() === 'd' ? 86_400_000 : match[2].toLowerCase() === 'h' ? 3_600_000 : 60_000;
