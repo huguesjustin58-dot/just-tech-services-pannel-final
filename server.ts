@@ -87,6 +87,59 @@ interface ServerCreditTransaction {
 
 const cloudEngine = new CloudConfigEngine();
 const sshCloudRegistry = new SshCloudConfigRegistry();
+
+interface ActiveTunnelSession {
+  id: string;
+  cloudCode: string;
+  deviceId: string;
+  protocol: string;
+  createdAt: number;
+  lastHeartbeatAt: number;
+}
+
+const activeTunnelSessions = new Map<string, ActiveTunnelSession>();
+const tunnelUsageFile = path.resolve(__dirname, 'data', 'vpn-usage.json');
+const tunnelUsageBytesByCloudCode = new Map<string, number>();
+try {
+  const savedUsage = JSON.parse(fs.readFileSync(tunnelUsageFile, 'utf8')) as Record<string, unknown>;
+  for (const [code, value] of Object.entries(savedUsage)) {
+    const bytes = Number(value);
+    if (/^[A-Z0-9-]{4,80}$/.test(code) && Number.isSafeInteger(bytes) && bytes >= 0) {
+      tunnelUsageBytesByCloudCode.set(code, bytes);
+    }
+  }
+} catch {
+  // First run: no VPN traffic has been recorded yet.
+}
+
+function persistTunnelUsage(): void {
+  fs.mkdirSync(path.dirname(tunnelUsageFile), { recursive: true });
+  const tempPath = `${tunnelUsageFile}.tmp`;
+  const value = Object.fromEntries(tunnelUsageBytesByCloudCode.entries());
+  fs.writeFileSync(tempPath, JSON.stringify(value), { encoding: 'utf8', mode: 0o600 });
+  fs.renameSync(tempPath, tunnelUsageFile);
+}
+
+function cloudConfigExpiresAt(createdAt: string, duration: string | undefined): number | null {
+  const match = typeof duration === 'string' ? duration.trim().match(/^(\\d+)\\s*([dhm])$/i) : null;
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unitMs = match[2].toLowerCase() === 'd' ? 86_400_000 : match[2].toLowerCase() === 'h' ? 3_600_000 : 60_000;
+  const issuedAt = Date.parse(createdAt);
+  if (!Number.isFinite(issuedAt) || !Number.isSafeInteger(amount) || amount <= 0) return null;
+  return issuedAt + amount * unitMs;
+}
+
+function sameTunnelProtocol(panelProtocol: string, appProtocol: string): boolean {
+  const panel = panelProtocol.trim().toUpperCase();
+  const app = appProtocol.trim().toUpperCase();
+  if (panel === app) return true;
+  if (app === 'SSH' || app === 'SSH_DIRECT') {
+    return panel.startsWith('SSH_') && panel !== 'SSH_WSS' && panel !== 'SSH_SLOWDNS';
+  }
+  return false;
+}
+
 const serverCreditTransactions: ServerCreditTransaction[] = [];
 const serverPartnerGbBalances = new Map<string, number>();
 const serverCreditIdempotency = new Map<string, ServerCreditTransaction>();
@@ -1186,7 +1239,149 @@ async function startServer() {
       return;
     }
 
+
     res.json(result.payload);
+  });
+
+  // Android VPN authorization uses the same Cloud Code registry that serves mobile configs.
+  // Usage is persisted locally so restarts do not reset a client's quota counter.
+  app.post('/api/v1/tunnel/authorize', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, private');
+    const cloudCode = String(req.body?.cloud_code || '').trim().toUpperCase();
+    const deviceId = String(req.body?.device_id || '').trim();
+    const protocol = String(req.body?.protocol || '').trim();
+    const serverHost = String(req.body?.server_host || '').trim().toLowerCase();
+    const panelConfigId = String(req.body?.panel_config_id || '').trim();
+
+    if (!cloudCode || !deviceId || !protocol || !serverHost) {
+      res.status(400).json({ authorized: false, status: 'INVALID_REQUEST', block_reason: 'Code Cloud, appareil, protocole et serveur sont requis.' });
+      return;
+    }
+
+    const resolved = sshCloudRegistry.resolveCloudCode(cloudCode, {
+      deviceId,
+      includeSecretsForMobileHandshake: false,
+    });
+    if (!resolved.ok) {
+      res.status(resolved.status).json({ authorized: false, status: resolved.errorCode, block_reason: resolved.error });
+      return;
+    }
+
+    const config = resolved.payload;
+    const expiresAt = cloudConfigExpiresAt(resolved.createdAt, config.subscription.duration);
+    if (expiresAt !== null && Date.now() >= expiresAt) {
+      res.status(403).json({ authorized: false, status: 'EXPIRED', block_reason: 'Cette configuration VPN a expiré.' });
+      return;
+    }
+    if (panelConfigId && panelConfigId !== config.config_id) {
+      res.status(403).json({ authorized: false, status: 'CONFIG_MISMATCH', block_reason: 'Le profil ne correspond pas au Code Cloud fourni.' });
+      return;
+    }
+    if (config.server.host.trim().toLowerCase() !== serverHost || !sameTunnelProtocol(config.protocol, protocol)) {
+      res.status(403).json({ authorized: false, status: 'CONFIG_MISMATCH', block_reason: 'Le serveur ou le protocole ne correspond pas à la configuration du Panel.' });
+      return;
+    }
+
+    const totalQuotaBytes = Math.max(0, Math.floor(Number(config.subscription.quota_bytes) || 0));
+    const usedQuotaBytes = tunnelUsageBytesByCloudCode.get(cloudCode) ?? 0;
+    if (totalQuotaBytes <= 0) {
+      res.status(403).json({ authorized: false, status: 'NO_QUOTA', block_reason: 'Aucun quota de données valide n’est attribué à ce Code Cloud.' });
+      return;
+    }
+    if (usedQuotaBytes >= totalQuotaBytes) {
+      res.status(402).json({ authorized: false, status: 'QUOTA_EXCEEDED', block_reason: 'Le quota de cette configuration est épuisé.' });
+      return;
+    }
+
+    const sessionId = `vpn_${crypto.randomBytes(18).toString('hex')}`;
+    activeTunnelSessions.set(sessionId, {
+      id: sessionId,
+      cloudCode,
+      deviceId,
+      protocol,
+      createdAt: Date.now(),
+      lastHeartbeatAt: Date.now(),
+    });
+    res.json({
+      authorized: true,
+      block_reason: null,
+      status: 'ACTIVE',
+      remaining_quota_bytes: totalQuotaBytes - usedQuotaBytes,
+      heartbeat_interval_sec: 60,
+      session_id: sessionId,
+      expires_at_epoch_ms: expiresAt,
+      server_time_epoch_ms: Date.now(),
+    });
+  });
+
+  app.post('/api/v1/tunnel/usage-heartbeat', (req: AuthenticatedRequest, res) => {
+    res.setHeader('Cache-Control', 'no-store, private');
+    const sessionId = String(req.body?.session_id || '').trim();
+    const deviceId = String(req.body?.device_id || '').trim();
+    const protocol = String(req.body?.protocol || '').trim();
+    const rx = Number(req.body?.delta_rx_bytes);
+    const tx = Number(req.body?.delta_tx_bytes);
+    const durationSeconds = Number(req.body?.duration_seconds);
+    const session = activeTunnelSessions.get(sessionId);
+
+    if (!session || session.deviceId !== deviceId || session.protocol !== protocol ||
+        !Number.isSafeInteger(rx) || rx < 0 || !Number.isSafeInteger(tx) || tx < 0 ||
+        !Number.isFinite(durationSeconds) || durationSeconds < 0) {
+      res.status(400).json({ continue_allowed: false, status: 'INVALID_SESSION', block_reason: 'La session VPN ou les compteurs de trafic sont invalides.' });
+      return;
+    }
+
+    const resolved = sshCloudRegistry.resolveCloudCode(session.cloudCode, {
+      deviceId,
+      includeSecretsForMobileHandshake: false,
+    });
+    if (!resolved.ok) {
+      activeTunnelSessions.delete(sessionId);
+      res.status(resolved.status).json({ continue_allowed: false, status: resolved.errorCode, block_reason: resolved.error });
+      return;
+    }
+
+    const expiresAt = cloudConfigExpiresAt(resolved.createdAt, resolved.payload.subscription.duration);
+    const totalQuotaBytes = Math.max(0, Math.floor(Number(resolved.payload.subscription.quota_bytes) || 0));
+    if (expiresAt !== null && Date.now() >= expiresAt) {
+      activeTunnelSessions.delete(sessionId);
+      res.status(403).json({ continue_allowed: false, status: 'EXPIRED', block_reason: 'Cette configuration VPN a expiré.' });
+      return;
+    }
+
+    const currentUsed = tunnelUsageBytesByCloudCode.get(session.cloudCode) ?? 0;
+    const nextUsed = currentUsed + rx + tx;
+    tunnelUsageBytesByCloudCode.set(session.cloudCode, nextUsed);
+    persistTunnelUsage();
+    session.lastHeartbeatAt = Date.now();
+
+    const allowed = totalQuotaBytes > 0 && nextUsed < totalQuotaBytes;
+    if (!allowed) activeTunnelSessions.delete(sessionId);
+    res.json({
+      continue_allowed: allowed,
+      block_reason: allowed ? null : 'Le quota de cette configuration est épuisé.',
+      status: allowed ? 'ACTIVE' : 'QUOTA_EXCEEDED',
+      total_quota_bytes: totalQuotaBytes,
+      used_quota_bytes: nextUsed,
+      expires_at_epoch_ms: expiresAt,
+      alert_message: null,
+      server_time_epoch_ms: Date.now(),
+    });
+  });
+
+  app.get('/api/v1/subscription/status', authRbac.requireRoles(['client']), (_req: AuthenticatedRequest, res) => {
+    res.setHeader('Cache-Control', 'no-store, private');
+    // The Panel currently does not link client accounts to a specific license record.
+    // Report that honestly rather than inventing plan or usage values.
+    res.json({
+      plan_name: 'Aucun pass lié à ce compte',
+      total_quota_bytes: 0,
+      used_quota_bytes: 0,
+      expires_at_epoch_ms: null,
+      status: 'UNAVAILABLE',
+      renew_url: 'https://root.justtechservices.xyz/',
+      server_time_epoch_ms: Date.now(),
+    });
   });
 
 interface PendingDelivery {
