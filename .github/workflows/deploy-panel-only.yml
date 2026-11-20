@@ -177,15 +177,19 @@ jobs:
 
           env_path = Path(sys.argv[1])
           bootstrap_path = Path(sys.argv[2])
-          managed = {"JTS_SUPERADMIN_EMAIL", "JTS_SUPERADMIN_PASSWORD"}
+          required = {"JTS_SUPERADMIN_EMAIL", "JTS_SUPERADMIN_PASSWORD"}
+          allowed = required | {"GEMINI_API_KEY"}
           new_values = {}
           for line in bootstrap_path.read_text(encoding="utf-8").splitlines():
               key, separator, value = line.partition("=")
-              if separator and key in managed:
+              if separator and key in allowed:
                   new_values[key] = value
-          if set(new_values) != managed:
+          if not required.issubset(new_values):
               raise SystemExit("Bootstrap file is missing required super-admin settings.")
 
+          # Update the Gemini key only when it was supplied as a GitHub secret;
+          # otherwise preserve any existing server-side value.
+          managed = required | ({"GEMINI_API_KEY"} if "GEMINI_API_KEY" in new_values else set())
           raw_text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
           if "\\n" in raw_text and "\n" not in raw_text:
               raw_text = raw_text.replace("\\n", "\n")
