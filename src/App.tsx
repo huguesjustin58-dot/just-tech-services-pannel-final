@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { FormEvent, useEffect, useState } from 'react';
-import { Check, Copy, Eye, EyeOff, LogIn, LogOut, Menu, ShieldCheck, X } from 'lucide-react';
+import { ArrowLeftRight, Check, Copy, Eye, EyeOff, LogIn, LogOut, Menu, ShieldCheck, X } from 'lucide-react';
 import { AdminAuthGate } from './components/AdminAuthGate';
 import { AdminWorkspace } from './components/AdminWorkspace';
 import { ClientWorkspace } from './components/ClientWorkspace';
@@ -314,6 +314,18 @@ export default function App() {
                   )}
                 </button>
               </ProtectedRoleWrapper>
+            )}
+
+            {isAuthorizedAdminStaff && (routeZone === 'admin' || routeZone === 'client') && (
+              <button
+                type="button"
+                onClick={() => navigateToZone(routeZone === 'admin' ? 'client' : 'admin')}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-[#101827] hover:bg-[#151F31] border border-[#45D7F4]/40 text-xs font-semibold text-[#45D7F4] rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                aria-label={routeZone === 'admin' ? 'Ouvrir le portail client' : 'Retourner à l’administration'}
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                {routeZone === 'admin' ? 'Portail client' : 'Administration'}
+              </button>
             )}
 
             {authUser && (
