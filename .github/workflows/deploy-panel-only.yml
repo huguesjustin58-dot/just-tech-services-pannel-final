@@ -136,8 +136,24 @@ jobs:
           TARGET="/opt/just-tech-services-pannel"
           SERVICE="jts-panel-web.service"
           [[ "$(id -u)" -eq 0 ]] || { echo "Deployment requires VPS_USER=root to use /opt and manage the panel service."; exit 1; }
-          command -v node >/dev/null && command -v npm >/dev/null || { echo "Node.js 22.12+ and npm must already be installed. This panel-only workflow does not install system packages."; exit 1; }
-          node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' || { echo "Node.js 22.12+ is required; no system changes were made."; exit 1; }
+          NODE_VERSION="22.23.4"
+          NODE_ARCHIVE="node-v${NODE_VERSION}-linux-x64.tar.xz"
+          NODE_RUNTIME="$TARGET/.runtime/node-v${NODE_VERSION}-linux-x64"
+          if command -v node >/dev/null && command -v npm >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)'; then
+            NODE_BIN="$(command -v node)"
+              NODE_BIN_DIR="$(dirname "$NODE_BIN")"
+          else
+            command -v curl >/dev/null || { echo "curl is required to download the panel-local Node.js runtime."; exit 1; }
+            mkdir -p "$TARGET/.runtime"
+            curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ARCHIVE}" -o "$REMOTE_DIR/$NODE_ARCHIVE"
+            curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" -o "$REMOTE_DIR/SHASUMS256.txt"
+            (cd "$REMOTE_DIR" && grep " ${NODE_ARCHIVE}$" SHASUMS256.txt | sha256sum -c -)
+            tar -xJf "$REMOTE_DIR/$NODE_ARCHIVE" -C "$TARGET/.runtime"
+            NODE_BIN_DIR="$NODE_RUNTIME/bin"
+            NODE_BIN="$NODE_BIN_DIR/node"
+            NPM_BIN="$NODE_BIN_DIR/npm"
+          fi
+          export PATH="$NODE_BIN_DIR:$PATH"
           [[ -f "$REMOTE_DIR/release.tar.gz" && -f "$REMOTE_DIR/bootstrap.env" ]] || { echo "Uploaded release files are missing."; exit 1; }
           if systemctl cat "$SERVICE" >/dev/null 2>&1; then
             existing_dir="$(systemctl show "$SERVICE" -p WorkingDirectory --value)"
@@ -149,8 +165,8 @@ jobs:
             install -m 600 "$REMOTE_DIR/bootstrap.env" "$TARGET/.env"
           fi
           cd "$TARGET"
-          npm install --include=dev --no-audit --no-fund
-          npm run build
+          "$NPM_BIN" install --include=dev --no-audit --no-fund
+          "$NPM_BIN" run build
           if ! id -u jts-panel >/dev/null 2>&1; then
             useradd --system --user-group --home-dir "$TARGET" --no-create-home --shell /usr/sbin/nologin jts-panel
           fi
@@ -168,6 +184,7 @@ jobs:
           Group=jts-panel
           WorkingDirectory=$TARGET
           EnvironmentFile=$TARGET/.env
+          Environment=PATH=$NODE_BIN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           ExecStart=$NPM_BIN start
           Restart=on-failure
           RestartSec=5
@@ -180,7 +197,7 @@ jobs:
           systemctl daemon-reload
           systemctl enable --now "$SERVICE"
           for attempt in $(seq 1 20); do
-            if node -e 'fetch("http://127.0.0.1:3000/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'; then
+            if "$NODE_BIN" -e 'fetch("http://127.0.0.1:3000/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'; then
               echo "Panel is responding on port 3000 in $TARGET."
               exit 0
             fi
