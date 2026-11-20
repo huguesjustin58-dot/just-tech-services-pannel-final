@@ -165,7 +165,7 @@ jobs:
             install -m 600 "$REMOTE_DIR/bootstrap.env" "$TARGET/.env"
           fi
           cd "$TARGET"
-          "$NPM_BIN" install --include=dev --no-audit --no-fund
+          "$NPM_BIN" install --include=dev --no-audit --no-fund --legacy-peer-deps
           "$NPM_BIN" run build
           if ! id -u jts-panel >/dev/null 2>&1; then
             useradd --system --user-group --home-dir "$TARGET" --no-create-home --shell /usr/sbin/nologin jts-panel
