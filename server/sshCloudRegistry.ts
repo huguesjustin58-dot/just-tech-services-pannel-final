@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import QRCode from 'qrcode';
 import type { PublicUserRecord, SessionRole } from './authRbac.js';
 import {
@@ -119,11 +121,43 @@ function buildLinks(cloudCode: string, origin: string): { resolveUrl: string; im
 export class SshCloudConfigRegistry {
   private readonly recordsByCode = new Map<string, CloudDistributionRecord>();
   private readonly codeByConfigId = new Map<string, string>();
+  private readonly stateFilePath = path.resolve(process.cwd(), 'data', 'vpn-cloud-registry.json');
 
   constructor() {
-    if (process.env.NODE_ENV !== 'production') {
+    this.loadPersistedRecords();
+    if (process.env.NODE_ENV !== 'production' && this.recordsByCode.size === 0) {
       void this.seedInitialRecords();
     }
+  }
+
+  private loadPersistedRecords(): void {
+    if (!fs.existsSync(this.stateFilePath)) return;
+    const parsed = JSON.parse(fs.readFileSync(this.stateFilePath, 'utf8')) as {
+      version?: number;
+      records?: CloudDistributionRecord[];
+    };
+    if (parsed.version !== 1 || !Array.isArray(parsed.records)) {
+      throw new Error('Le registre VPN persistant est invalide; démarrage arrêté pour protéger les configurations.');
+    }
+    for (const record of parsed.records) {
+      if (!record?.cloudCode || !record.configId || !record.config?.authentication) {
+        throw new Error('Une configuration VPN persistée est invalide; démarrage arrêté.');
+      }
+      this.recordsByCode.set(record.cloudCode, record);
+      this.codeByConfigId.set(record.configId, record.cloudCode);
+    }
+  }
+
+  private persistRecords(): void {
+    const directory = path.dirname(this.stateFilePath);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const temporaryPath = `${this.stateFilePath}.tmp`;
+    fs.writeFileSync(
+      temporaryPath,
+      JSON.stringify({ version: 1, records: Array.from(this.recordsByCode.values()) }, null, 2),
+      { encoding: 'utf8', mode: 0o600 }
+    );
+    fs.renameSync(temporaryPath, this.stateFilePath);
   }
 
   private async seedInitialRecords(): Promise<void> {
@@ -260,6 +294,7 @@ export class SshCloudConfigRegistry {
       });
       this.codeByConfigId.set(item.cfg.config_id, code);
     }
+    this.persistRecords();
   }
 
   private nextUniqueCloudCode(): string {
@@ -479,6 +514,7 @@ export class SshCloudConfigRegistry {
 
     this.recordsByCode.set(finalCloudCode, record);
     this.codeByConfigId.set(record.configId, finalCloudCode);
+    this.persistRecords();
 
     return { ok: true, record: this.toPublicView(record, options.origin) };
   }
@@ -518,6 +554,7 @@ export class SshCloudConfigRegistry {
       record.revokedAt = null;
       record.revokedBy = null;
     }
+    this.persistRecords();
 
     return { ok: true, record: this.toPublicView(record, origin) };
   }
@@ -540,6 +577,7 @@ export class SshCloudConfigRegistry {
     }
     this.recordsByCode.delete(cleanCode);
     this.codeByConfigId.delete(record.configId);
+    this.persistRecords();
     return { ok: true };
   }
 
@@ -612,6 +650,7 @@ export class SshCloudConfigRegistry {
     record.resolveCount += 1;
     record.lastResolvedAt = now;
     record.lastResolvedDevice = options.deviceId?.trim() || 'client-anonyme';
+    this.persistRecords();
 
     const payload = buildSshCloudConfigV1Object(record.config, {
       redactSecrets: !options.includeSecretsForMobileHandshake,
