@@ -7,7 +7,21 @@ interface RevenueTrafficChartProps {
 }
 
 export const RevenueTrafficChart: React.FC<RevenueTrafficChartProps> = ({ data }) => {
-  const [hoveredIdx, setHoveredIdx] = useState<number>(data.length - 1);
+  const [hoveredIdx, setHoveredIdx] = useState<number>(Math.max(0, data.length - 1));
+
+  if (data.length === 0) {
+    return (
+      <div className="bg-[#101827] border border-[#243147] rounded-xl p-5">
+        <h3 className="font-display text-base font-semibold text-[#F2F6FF]">
+          Revenus & trafic réseau · 7 jours
+        </h3>
+        <p className="mt-4 rounded-lg border border-[#243147] bg-[#070B14] p-5 text-sm text-[#8D9AAF]">
+          Aucune donnée réelle de trafic ou de revenu n’est enregistrée pour cette période.
+          Le trafic VPN restera indiqué comme non mesuré tant qu’une source de télémétrie ne sera pas connectée.
+        </p>
+      </div>
+    );
+  }
   const [activeSeries, setActiveSeries] = useState<'both' | 'revenue' | 'traffic'>('both');
 
   const width = 680;
