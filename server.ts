@@ -341,6 +341,33 @@ async function startServer() {
   app.use(authRbac.attachSessionMiddleware);
 
   // 0a. Authentification & Isolation RBAC stricte (5 rôles : Super Admin, Admin, Manager, Reseller, Client)
+  app.post('/api/auth/register', (req: AuthenticatedRequest, res) => {
+    res.setHeader('Cache-Control', 'no-store, private');
+    const { name = '', email = '', password = '' } = req.body ?? {};
+    const registration = authRbac.registerClient({
+      name: String(name),
+      email: String(email),
+      password: String(password),
+    });
+    if (!registration.ok) {
+      res.status(registration.status).json({ authenticated: false, error: registration.error });
+      return;
+    }
+
+    // Sign the new client in immediately; public registration can never choose a privileged role.
+    const result = authRbac.authenticate(registration.user.email, String(password), 'client');
+    if (!result.ok) {
+      res.status(result.status).json({ authenticated: false, error: result.error });
+      return;
+    }
+    authRbac.setSessionCookie(req, res, result.token);
+    res.status(201).json({
+      authenticated: true,
+      user: result.user,
+      token: result.token,
+    });
+  });
+
   app.post('/api/auth/login', (req, res) => {
     res.setHeader('Cache-Control', 'no-store, private');
     const { email = '', password = '', zone } = req.body ?? {};
