@@ -1401,11 +1401,26 @@ Paiements officiels :
 Livraison après paiement : Android -> Code Cloud ; iPhone -> Fichier .npvt généré automatiquement.
 Réponds en français de façon claire, précise et directe.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
-        contents: message,
-        config: { systemInstruction: context },
-      });
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: message,
+          config: { systemInstruction: context },
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const isCapacityError =
+          /\b(429|503)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand/i.test(errorMessage);
+        if (!isCapacityError) throw error;
+
+        // Retry transient capacity/rate-limit errors with Google's lower-cost Flash-Lite model.
+        response = await ai.models.generateContent({
+          model: 'gemini-3.5-flash-lite',
+          contents: message,
+          config: { systemInstruction: context },
+        });
+      }
 
       res.json({ reply: response.text ?? '' });
     } catch (error) {
