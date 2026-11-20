@@ -91,8 +91,6 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
   const [selectedPlan, setSelectedPlan] = useState<PlanOffer>(
     () => PLANS.find((p) => p.id === 'npv-5000') ?? PLANS[0]
   ); // NPV 60 Go par défaut
-  const [activeExpiry] = useState('2026-12-18');
-  const [dataUsedGb] = useState(14.2);
   const [sshCredentials, setSshCredentials] = useState({
     username: '',
     password: '',
@@ -116,6 +114,8 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
     latestCloudCode
   );
   const [activeCloudBundle, setActiveCloudBundle] = useState<CloudConfigBundle | null>(null);
+  const dataUsedGb = activeCloudBundle?.quota.usedGb ?? 0;
+  const activeQuotaGb = activeCloudBundle?.quota.totalGb ?? 0;
   const [cloudBundleLoading, setCloudBundleLoading] = useState(false);
   const [cloudBundleError, setCloudBundleError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -380,7 +380,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
           dataQuotaGb: plan.dataQuotaGb ?? 3,
           dataUsedGb: usedGb,
           durationHours: plan.durationHours,
-          expiresAt: `${activeExpiry}T23:59:59Z`,
+          expiresAt: new Date(Date.now() + plan.durationHours * 60 * 60 * 1000).toISOString(),
           maxSessions: plan.maxSessions,
           serverCode: 'VPS-CM-01',
           licenseStatus: 'Active',
@@ -468,7 +468,7 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
           clientName: clientName,
           dataQuotaGb: selectedPlan.dataQuotaGb ?? 3,
           dataUsedGb,
-          expiresAt: `${activeExpiry}T23:59:59Z`,
+          expiresAt: new Date(Date.now() + selectedPlan.durationHours * 60 * 60 * 1000).toISOString(),
           maxSessions: selectedPlan.maxSessions,
           serverCode: 'VPS-CM-01',
           licenseStatus: 'Active',
@@ -560,9 +560,9 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
   const npvPlans = PLANS.filter((p) => p.category === 'NPV TUNNEL');
   const freeTestPlan = PLANS.find((p) => p.category === 'OFFRE TEST GRATUIT')!;
 
-  const usagePercent = selectedPlan.dataQuotaGb
-    ? Math.min(100, Math.round((dataUsedGb / selectedPlan.dataQuotaGb) * 100))
-    : 12;
+  const usagePercent = activeQuotaGb > 0
+    ? Math.min(100, Math.round((dataUsedGb / activeQuotaGb) * 100))
+    : 0;
 
   return (
     <div className="max-w-6xl mx-auto p-5 lg:p-7 space-y-7">
@@ -614,12 +614,14 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
           <div>
             <div className="flex items-center gap-2.5">
               <span className="text-sm font-semibold text-[#F2F6FF]">
-                Pass actif : {selectedPlan.name}
+                Pass actif : {activeCloudBundle?.planName ?? 'Aucun pass actif'}
               </span>
-              <LicenseStatusText status="Active" />
+              {activeCloudBundle && <LicenseStatusText status="Active" />}
             </div>
             <p className="text-xs text-[#8D9AAF] mt-1 font-mono-tabular">
-              Validité {selectedPlan.durationLabel} · Expire le {activeExpiry}
+              {activeCloudBundle
+                ? `Expire le ${new Date(activeCloudBundle.expiresAt).toLocaleDateString('fr-FR')}`
+                : 'Aucun pass actif enregistré pour ce compte.'}
             </p>
           </div>
 
@@ -627,7 +629,9 @@ export const ClientWorkspace: React.FC<ClientWorkspaceProps> = ({
             <div className="flex items-center justify-between text-xs font-mono-tabular">
               <span className="text-[#8D9AAF]">Consommation</span>
               <span className="text-[#F2F6FF]">
-                {dataUsedGb.toFixed(1)} Go / {selectedPlan.dataQuotaGb ?? 0} Go
+                {activeCloudBundle
+                  ? `${dataUsedGb.toFixed(1)} Go / ${activeQuotaGb} Go`
+                  : 'Non mesurée · aucune source VPN liée'}
               </span>
             </div>
             <div className="w-full h-2 bg-[#070B14] border border-[#243147] rounded-full overflow-hidden">
