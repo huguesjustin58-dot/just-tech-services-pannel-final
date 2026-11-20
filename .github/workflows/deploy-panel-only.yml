@@ -180,7 +180,10 @@ jobs:
           if set(new_values) != managed:
               raise SystemExit("Bootstrap file is missing required super-admin settings.")
 
-          old_lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+          raw_text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+          if "\\n" in raw_text and "\n" not in raw_text:
+              raw_text = raw_text.replace("\\n", "\n")
+          old_lines = raw_text.splitlines()
           result = []
           written = set()
           for line in old_lines:
