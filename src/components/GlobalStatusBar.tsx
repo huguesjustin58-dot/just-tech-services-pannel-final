@@ -10,7 +10,7 @@ export const GlobalStatusBar: React.FC = () => {
   );
   const [lastCheck, setLastCheck] = useState<string>('—');
 
-  const activeServer = INITIAL_SERVERS[selectedServerIdx] ?? INITIAL_SERVERS[0];
+  const activeServer = INITIAL_SERVERS[selectedServerIdx] ?? null;
 
   const probeBackendHealth = useCallback(async () => {
     setApiStatus('Synchronisation...');
@@ -56,30 +56,38 @@ export const GlobalStatusBar: React.FC = () => {
     <footer className="bg-[#101827] border-t border-[#243147] px-5 lg:px-7 py-2.5 text-xs text-[#8D9AAF]">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-5">
-          {/* Nœud VPN surveillé */}
-          <button
-            type="button"
-            onClick={() => setSelectedServerIdx((i) => (i + 1) % INITIAL_SERVERS.length)}
-            className="inline-flex items-center gap-2 hover:text-[#F2F6FF] transition-colors cursor-pointer"
-            title="Changer de nœud VPN surveillé"
-          >
-            <Server className="w-3.5 h-3.5 text-[#E5B84B] shrink-0" />
-            <span>Nœud VPN :</span>
-            <span className="font-mono-tabular font-medium text-[#F2F6FF]">
-              {activeServer.code}
-            </span>
-            <span
-              className={`font-medium ${
-                activeServer.status === 'En ligne'
-                  ? 'text-[#45D7F4]'
-                  : activeServer.status === 'Hors ligne'
-                    ? 'text-[#EF4444]'
-                    : 'text-[#E5B84B]'
-              }`}
+          {/* Nœud VPN affiché uniquement lorsqu'un serveur réel est configuré */}
+          {activeServer ? (
+            <button
+              type="button"
+              onClick={() => setSelectedServerIdx((i) => (i + 1) % INITIAL_SERVERS.length)}
+              className="inline-flex items-center gap-2 hover:text-[#F2F6FF] transition-colors cursor-pointer"
+              title="Changer de nœud VPN surveillé"
             >
-              ({activeServer.status === 'Non vérifié' ? 'Sonde SSH distante requise' : activeServer.status})
-            </span>
-          </button>
+              <Server className="w-3.5 h-3.5 text-[#E5B84B] shrink-0" />
+              <span>Nœud VPN :</span>
+              <span className="font-mono-tabular font-medium text-[#F2F6FF]">
+                {activeServer.code}
+              </span>
+              <span
+                className={`font-medium ${
+                  activeServer.status === 'En ligne'
+                    ? 'text-[#45D7F4]'
+                    : activeServer.status === 'Hors ligne'
+                      ? 'text-[#EF4444]'
+                      : 'text-[#E5B84B]'
+                }`}
+              >
+                ({activeServer.status === 'Non vérifié' ? 'Sonde SSH distante requise' : activeServer.status})
+              </span>
+            </button>
+          ) : (
+            <div className="inline-flex items-center gap-2" aria-label="Aucun nœud VPN configuré">
+              <Server className="w-3.5 h-3.5 text-[#8D9AAF] shrink-0" />
+              <span>Nœud VPN :</span>
+              <span className="font-medium text-[#8D9AAF]">Aucun nœud configuré</span>
+            </div>
+          )}
 
           {/* Latence HTTP réelle mesurée vers /api/health */}
           <div className="inline-flex items-center gap-2">
