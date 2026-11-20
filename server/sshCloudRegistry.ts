@@ -58,6 +58,7 @@ export type ResolveCloudResult =
       status: 200;
       cloudCode: string;
       resolvedAt: string;
+      createdAt: string;
       resolveCount: number;
       deliveryMode: 'mobile_handshake' | 'public_redacted';
       payload: SshCloudConfigV1;
@@ -621,6 +622,7 @@ export class SshCloudConfigRegistry {
       status: 200,
       cloudCode: cleanCode,
       resolvedAt: now,
+      createdAt: record.createdAt,
       resolveCount: record.resolveCount,
       deliveryMode: options.includeSecretsForMobileHandshake
         ? 'mobile_handshake'
