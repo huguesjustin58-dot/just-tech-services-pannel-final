@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { FormEvent, useEffect, useState } from 'react';
-import { Check, Copy, LogIn, LogOut, Menu, ShieldCheck, X } from 'lucide-react';
+import { Check, Copy, Eye, EyeOff, LogIn, LogOut, Menu, ShieldCheck, X } from 'lucide-react';
 import { AdminAuthGate } from './components/AdminAuthGate';
 import { AdminWorkspace } from './components/AdminWorkspace';
 import { ClientWorkspace } from './components/ClientWorkspace';
@@ -84,6 +84,7 @@ export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
 
@@ -536,14 +537,25 @@ export default function App() {
                 <label className="block text-xs font-medium text-[#8D9AAF] mb-1">
                   Mot de passe
                 </label>
-                <input
-                  type="password"
-                  required
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full rounded-lg border border-[#243147] bg-[#070B14] px-3 py-2 text-sm text-[#F2F6FF] focus:border-[#45D7F4] focus:outline-none"
-                />
+                <div className="relative">
+                  <input
+                    type={showAuthPassword ? 'text' : 'password'}
+                    required
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    className="w-full rounded-lg border border-[#243147] bg-[#070B14] px-3 py-2 pr-10 text-sm text-[#F2F6FF] focus:border-[#45D7F4] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthPassword((visible) => !visible)}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-[#8D9AAF] hover:text-[#F2F6FF]"
+                    aria-label={showAuthPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    aria-pressed={showAuthPassword}
+                  >
+                    {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               {authError && (
