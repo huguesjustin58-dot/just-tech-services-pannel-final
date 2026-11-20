@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { FormEvent, useEffect, useState } from 'react';
-import { ArrowLeftRight, Check, Copy, Eye, EyeOff, LogIn, LogOut, Menu, ShieldCheck, X } from 'lucide-react';
+import { ArrowLeftRight, Check, Copy, Eye, EyeOff, LogIn, LogOut, Menu, ShieldCheck, UserPlus, X } from 'lucide-react';
 import { AdminAuthGate } from './components/AdminAuthGate';
 import { AdminWorkspace } from './components/AdminWorkspace';
 import { ClientWorkspace } from './components/ClientWorkspace';
@@ -17,6 +17,7 @@ import { INITIAL_CLOUD_CODES, INITIAL_NPV_PROTOTYPE } from './data/maquetteData'
 import {
   fetchCurrentSession,
   loginWithCredentials,
+  registerClientAccount,
   logoutSession,
 } from './services/authClient';
 import {
@@ -82,8 +83,11 @@ export default function App() {
 
   // Modale de connexion Portail Client (sans exposer d'accès admin dans le DOM client)
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authName, setAuthName] = useState('');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authPasswordConfirm, setAuthPasswordConfirm] = useState('');
   const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -179,20 +183,36 @@ export default function App() {
     }
   };
 
-  const handleClientModalLoginSubmit = async (e: FormEvent) => {
+  const handleClientModalSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    const name = authName.trim();
     const email = authEmail.trim().toLowerCase();
     const password = authPassword;
 
-    if (!email || !password) {
-      setAuthError('Veuillez renseigner votre adresse e-mail et votre mot de passe.');
+    if (!email || !password || (authMode === 'register' && !name)) {
+      setAuthError(
+        authMode === 'register'
+          ? 'Veuillez renseigner votre nom, votre adresse e-mail et votre mot de passe.'
+          : 'Veuillez renseigner votre adresse e-mail et votre mot de passe.'
+      );
+      return;
+    }
+    if (authMode === 'register' && password.length < 8) {
+      setAuthError('Le mot de passe doit contenir au moins 8 caractères.');
+      return;
+    }
+    if (authMode === 'register' && password !== authPasswordConfirm) {
+      setAuthError('Les deux mots de passe ne correspondent pas.');
       return;
     }
 
     setAuthSubmitting(true);
     try {
-      const result = await loginWithCredentials(email, password);
+      const result =
+        authMode === 'register'
+          ? await registerClientAccount(name, email, password)
+          : await loginWithCredentials(email, password);
       if (!result.ok) {
         setAuthError(result.error);
         return;
@@ -345,6 +365,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    setAuthMode('login');
                     setAuthError(null);
                     setAuthModalOpen(true);
                   }}
@@ -507,17 +528,19 @@ export default function App() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Connexion à votre compte JUST TECH SERVICES"
+          aria-label={authMode === 'register' ? 'Créer un compte JUST TECH SERVICES' : 'Connexion à votre compte JUST TECH SERVICES'}
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#070B14]/80 backdrop-blur-sm px-4"
         >
           <div className="w-full max-w-md rounded-2xl border border-[#243147] bg-[#101827] p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-[#F2F6FF]">
-                  Connexion Compte
+                  {authMode === 'register' ? 'Créer un compte' : 'Connexion Compte'}
                 </h2>
                 <p className="text-xs text-[#8D9AAF] mt-0.5">
-                  Identifiez-vous pour accéder à votre espace personnel.
+                  {authMode === 'register'
+                    ? 'Créez votre espace pour commander un forfait et discuter avec l’Agent IA.'
+                    : 'Identifiez-vous pour accéder à votre espace personnel.'}
                 </p>
               </div>
               <button
@@ -530,13 +553,32 @@ export default function App() {
               </button>
             </div>
 
-            <form onSubmit={handleClientModalLoginSubmit} className="space-y-4">
+            <form onSubmit={handleClientModalSubmit} className="space-y-4">
+              {authMode === 'register' && (
+                <div>
+                  <label className="block text-xs font-medium text-[#8D9AAF] mb-1">
+                    Nom complet
+                  </label>
+                  <input
+                    type="text"
+                    autoComplete="name"
+                    required
+                    maxLength={120}
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    placeholder="Votre nom"
+                    className="w-full rounded-lg border border-[#243147] bg-[#070B14] px-3 py-2 text-sm text-[#F2F6FF] focus:border-[#45D7F4] focus:outline-none"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-medium text-[#8D9AAF] mb-1">
                   Adresse e-mail
                 </label>
                 <input
                   type="email"
+                  autoComplete="email"
                   required
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
@@ -552,6 +594,8 @@ export default function App() {
                 <div className="relative">
                   <input
                     type={showAuthPassword ? 'text' : 'password'}
+                    autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                    minLength={authMode === 'register' ? 8 : undefined}
                     required
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
@@ -569,6 +613,30 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {authMode === 'register' && (
+                <div>
+                  <label className="block text-xs font-medium text-[#8D9AAF] mb-1">
+                    Confirmer le mot de passe
+                  </label>
+                  <input
+                    type={showAuthPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                    value={authPasswordConfirm}
+                    onChange={(e) => setAuthPasswordConfirm(e.target.value)}
+                    placeholder="Répétez le mot de passe"
+                    className="w-full rounded-lg border border-[#243147] bg-[#070B14] px-3 py-2 text-sm text-[#F2F6FF] focus:border-[#45D7F4] focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {authMode === 'register' && (
+                <p className="text-[11px] leading-5 text-[#8D9AAF]">
+                  Votre nom et votre e-mail servent à gérer votre compte client. Le mot de passe est enregistré sous forme sécurisée, jamais en clair.
+                </p>
+              )}
 
               {authError && (
                 <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">
@@ -589,9 +657,25 @@ export default function App() {
                   disabled={authSubmitting}
                   className="px-4 py-2 rounded-lg bg-[#E5B84B] hover:bg-[#D4A136] disabled:opacity-60 text-[#070B14] text-xs font-semibold cursor-pointer transition-colors"
                 >
-                  {authSubmitting ? 'Connexion...' : 'Se connecter'}
+                  {authSubmitting
+                    ? authMode === 'register' ? 'Création...' : 'Connexion...'
+                    : authMode === 'register' ? 'Créer mon compte' : 'Se connecter'}
                 </button>
               </div>
+              <p className="text-center text-xs text-[#8D9AAF]">
+                {authMode === 'register' ? 'Vous avez déjà un compte ?' : 'Nouveau client ?'}{' '}
+                <button
+                  type="button"
+                  disabled={authSubmitting}
+                  onClick={() => {
+                    setAuthMode((mode) => mode === 'register' ? 'login' : 'register');
+                    setAuthError(null);
+                  }}
+                  className="font-semibold text-[#45D7F4] hover:text-[#8BE9F8] disabled:opacity-60"
+                >
+                  {authMode === 'register' ? 'Se connecter' : 'Créer un compte'}
+                </button>
+              </p>
             </form>
           </div>
         </div>
