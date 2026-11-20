@@ -1,0 +1,195 @@
+name: Deploy JUST TECH SERVICES Panel (keep VPN untouched)
+
+on:
+  workflow_dispatch:
+    inputs:
+      panel_url:
+        description: "Optional public panel URL (leave blank to use http://VPS_HOST:3000)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jts-panel-only-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy panel only
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Verify TypeScript and production build
+        run: |
+          bun install --frozen-lockfile
+          bun run lint
+          bun run build
+
+      - name: Validate deployment settings
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+          JTS_SUPERADMIN_EMAIL: ${{ secrets.JTS_SUPERADMIN_EMAIL }}
+          JTS_SUPERADMIN_PASSWORD: ${{ secrets.JTS_SUPERADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in VPS_HOST VPS_SSH_KEY VPS_KNOWN_HOSTS JTS_SUPERADMIN_EMAIL JTS_SUPERADMIN_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing repository secret: ${name}"
+              exit 1
+            fi
+          done
+          [[ "$VPS_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "::error::VPS_HOST is invalid."; exit 1; }
+          [[ "$VPS_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::VPS_USER is invalid."; exit 1; }
+          [[ "$VPS_KNOWN_HOSTS" == *"$VPS_HOST"* ]] || { echo "::error::VPS_KNOWN_HOSTS must include VPS_HOST."; exit 1; }
+          [[ "$JTS_SUPERADMIN_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || { echo "::error::JTS_SUPERADMIN_EMAIL is invalid."; exit 1; }
+          [[ "${#JTS_SUPERADMIN_PASSWORD}" -ge 16 && "$JTS_SUPERADMIN_PASSWORD" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "::error::Admin password must be 16+ letters, numbers, underscore, or hyphen."; exit 1; }
+
+      - name: Prepare release and first-run settings
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          PANEL_URL: ${{ inputs.panel_url }}
+          JTS_SUPERADMIN_EMAIL: ${{ secrets.JTS_SUPERADMIN_EMAIL }}
+          JTS_SUPERADMIN_PASSWORD: ${{ secrets.JTS_SUPERADMIN_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -m 700 -p "$RUNNER_TEMP/jts-panel"
+          git archive --format=tar.gz --prefix=repo/ "$GITHUB_SHA" > "$RUNNER_TEMP/jts-panel/release.tar.gz"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import secrets
+
+          def dotenv_quote(value):
+              return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '') + '"'
+
+          host = os.environ["VPS_HOST"]
+          panel_url = os.environ.get("PANEL_URL", "").strip() or f"http://{host}:3000"
+          lines = [
+              "NODE_ENV=production",
+              "PORT=3000",
+              f"APP_URL={dotenv_quote(panel_url)}",
+              f"JTS_SUPERADMIN_EMAIL={dotenv_quote(os.environ['JTS_SUPERADMIN_EMAIL'])}",
+              f"JTS_SUPERADMIN_PASSWORD={dotenv_quote(os.environ['JTS_SUPERADMIN_PASSWORD'])}",
+              f"JTS_MOBILE_CONTRACT_SECRET={secrets.token_hex(32)}",
+          ]
+          gemini_key = os.environ.get("GEMINI_API_KEY", "")
+          if gemini_key:
+              lines.append(f"GEMINI_API_KEY={dotenv_quote(gemini_key)}")
+          Path(os.environ["RUNNER_TEMP"], "jts-panel", "bootstrap.env").write_text(
+              "\n".join(lines) + "\n", encoding="utf-8"
+          )
+          PY
+          chmod 600 "$RUNNER_TEMP/jts-panel/bootstrap.env"
+
+      - name: Upload release to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/jts_vps_key"
+          chmod 600 "$HOME/.ssh/jts_vps_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          REMOTE_DIR="/tmp/jts-panel-$GITHUB_SHA"
+          ssh -i "$HOME/.ssh/jts_vps_key" -p "${{ secrets.VPS_PORT || '22' }}" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$VPS_USER@$VPS_HOST" "mkdir -m 700 -p '$REMOTE_DIR'"
+          scp -i "$HOME/.ssh/jts_vps_key" -P "${{ secrets.VPS_PORT || '22' }}" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$RUNNER_TEMP/jts-panel/release.tar.gz" "$RUNNER_TEMP/jts-panel/bootstrap.env" "$VPS_USER@$VPS_HOST:$REMOTE_DIR/"
+
+      - name: Install panel in the requested folder (no VPN or network changes)
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          REMOTE_DIR="/tmp/jts-panel-$GITHUB_SHA"
+          ssh -i "$HOME/.ssh/jts_vps_key" -p "$VPS_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$VPS_USER@$VPS_HOST" bash -s -- "$REMOTE_DIR" "$GITHUB_SHA" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          REMOTE_DIR="$1"
+          RELEASE_SHA="$2"
+          TARGET="/opt/just-tech-services-pannel"
+          SERVICE="jts-panel-web.service"
+          [[ "$(id -u)" -eq 0 ]] || { echo "Deployment requires VPS_USER=root to use /opt and manage the panel service."; exit 1; }
+          command -v node >/dev/null && command -v npm >/dev/null || { echo "Node.js 22.12+ and npm must already be installed. This panel-only workflow does not install system packages."; exit 1; }
+          node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' || { echo "Node.js 22.12+ is required; no system changes were made."; exit 1; }
+          [[ -f "$REMOTE_DIR/release.tar.gz" && -f "$REMOTE_DIR/bootstrap.env" ]] || { echo "Uploaded release files are missing."; exit 1; }
+          if systemctl cat "$SERVICE" >/dev/null 2>&1; then
+            existing_dir="$(systemctl show "$SERVICE" -p WorkingDirectory --value)"
+            [[ "$existing_dir" == "$TARGET" ]] || { echo "$SERVICE already exists for another folder; refusing to replace it."; exit 1; }
+          fi
+          mkdir -p "$TARGET"
+          tar -xzf "$REMOTE_DIR/release.tar.gz" --strip-components=1 -C "$TARGET"
+          if [[ ! -f "$TARGET/.env" ]]; then
+            install -m 600 "$REMOTE_DIR/bootstrap.env" "$TARGET/.env"
+          fi
+          cd "$TARGET"
+          npm install --include=dev --no-audit --no-fund
+          npm run build
+          if ! id -u jts-panel >/dev/null 2>&1; then
+            useradd --system --home-dir "$TARGET" --no-create-home --shell /usr/sbin/nologin jts-panel
+          fi
+          chown -R jts-panel:jts-panel "$TARGET"
+          chmod 600 "$TARGET/.env"
+          NPM_BIN="$(command -v npm)"
+          cat > "/etc/systemd/system/$SERVICE" <<UNIT
+          [Unit]
+          Description=JUST TECH SERVICES Panel
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=jts-panel
+          Group=jts-panel
+          WorkingDirectory=$TARGET
+          EnvironmentFile=$TARGET/.env
+          ExecStart=$NPM_BIN start
+          Restart=on-failure
+          RestartSec=5
+          NoNewPrivileges=true
+          PrivateTmp=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now "$SERVICE"
+          for attempt in $(seq 1 20); do
+            if node -e 'fetch("http://127.0.0.1:3000/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'; then
+              echo "Panel is responding on port 3000 in $TARGET."
+              rm -rf "$REMOTE_DIR"
+              exit 0
+            fi
+            sleep 2
+          done
+          systemctl --no-pager --full status "$SERVICE" || true
+          echo "Panel did not become healthy. VPN, SSH, firewall, and Nginx settings were not changed."
+          exit 1
+          REMOTE_SCRIPT
+
+      - name: Remove runner SSH files
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/jts-panel" "$HOME/.ssh/jts_vps_key" "$HOME/.ssh/known_hosts"
