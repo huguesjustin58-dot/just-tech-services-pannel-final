@@ -11,6 +11,11 @@ on:
         required: false
         default: ""
         type: string
+      reset_superadmin:
+        description: "Apply the current GitHub super-admin secrets and clear only the saved super-admin password"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -131,10 +136,11 @@ jobs:
         run: |
           set -euo pipefail
           REMOTE_DIR="/tmp/jts-panel-$GITHUB_SHA"
-          ssh -i "$HOME/.ssh/jts_vps_key" -p "$VPS_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$VPS_USER@$VPS_HOST" bash -s -- "$REMOTE_DIR" "$GITHUB_SHA" <<'REMOTE_SCRIPT'
+          ssh -i "$HOME/.ssh/jts_vps_key" -p "$VPS_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$VPS_USER@$VPS_HOST" bash -s -- "$REMOTE_DIR" "$GITHUB_SHA" "${{ inputs.reset_superadmin || false }}" <<'REMOTE_SCRIPT'
           set -euo pipefail
           REMOTE_DIR="$1"
           RELEASE_SHA="$2"
+          RESET_SUPERADMIN="${3:-false}"
           trap 'rm -rf "$REMOTE_DIR"' EXIT
           TARGET="/opt/just-tech-services-pannel"
           SERVICE="jts-panel-web.service"
@@ -203,6 +209,28 @@ jobs:
           temp_path.replace(env_path)
           PY
           echo "Updated super-admin credentials from GitHub Secrets."
+          if [[ "$RESET_SUPERADMIN" == "true" ]]; then
+            python3 - "$TARGET/data/auth-state.json" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          state_path = Path(sys.argv[1])
+          if state_path.exists():
+              state = json.loads(state_path.read_text(encoding="utf-8"))
+              if isinstance(state, dict) and isinstance(state.get("users"), list):
+                  state["users"] = [
+                      user for user in state["users"]
+                      if not isinstance(user, dict) or user.get("id") != "usr-superadmin"
+                  ]
+                  temp_path = state_path.with_name(state_path.name + ".tmp")
+                  temp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                  os.chmod(temp_path, 0o600)
+                  temp_path.replace(state_path)
+          print("Cleared saved super-admin override; other saved accounts were retained.")
+          PY
+          fi
           cd "$TARGET"
           "$NPM_BIN" install --include=dev --no-audit --no-fund --legacy-peer-deps
           "$NPM_BIN" run build
@@ -234,7 +262,8 @@ jobs:
           WantedBy=multi-user.target
           UNIT
           systemctl daemon-reload
-          systemctl enable --now "$SERVICE"
+          systemctl enable "$SERVICE"
+          systemctl restart "$SERVICE"
           for attempt in $(seq 1 20); do
             if "$NODE_BIN" -e 'fetch("http://127.0.0.1:3000/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'; then
               echo "Panel is responding on port 3000 in $TARGET."
