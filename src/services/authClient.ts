@@ -50,6 +50,36 @@ export async function fetchCurrentSession(): Promise<AuthenticatedUser | null> {
   }
 }
 
+export async function registerClientAccount(
+  name: string,
+  email: string,
+  password: string
+): Promise<{ ok: true; user: AuthenticatedUser } | { ok: false; error: string }> {
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    });
+    const data = (await res.json()) as {
+      authenticated?: boolean;
+      user?: AuthenticatedUser;
+      token?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.authenticated || !data.user) {
+      return { ok: false, error: data.error || 'Impossible de créer le compte client.' };
+    }
+    if (data.token) {
+      setStoredAuthToken(data.token);
+    }
+    return { ok: true, user: data.user };
+  } catch {
+    return { ok: false, error: 'Impossible de joindre le serveur pour créer le compte.' };
+  }
+}
+
 export async function loginWithCredentials(
   email: string,
   password: string,
