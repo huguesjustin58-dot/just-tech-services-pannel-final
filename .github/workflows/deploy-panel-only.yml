@@ -130,6 +130,7 @@ jobs:
           set -euo pipefail
           REMOTE_DIR="$1"
           RELEASE_SHA="$2"
+          trap 'rm -rf "$REMOTE_DIR"' EXIT
           TARGET="/opt/just-tech-services-pannel"
           SERVICE="jts-panel-web.service"
           [[ "$(id -u)" -eq 0 ]] || { echo "Deployment requires VPS_USER=root to use /opt and manage the panel service."; exit 1; }
@@ -149,7 +150,7 @@ jobs:
           npm install --include=dev --no-audit --no-fund
           npm run build
           if ! id -u jts-panel >/dev/null 2>&1; then
-            useradd --system --home-dir "$TARGET" --no-create-home --shell /usr/sbin/nologin jts-panel
+            useradd --system --user-group --home-dir "$TARGET" --no-create-home --shell /usr/sbin/nologin jts-panel
           fi
           chown -R jts-panel:jts-panel "$TARGET"
           chmod 600 "$TARGET/.env"
@@ -189,7 +190,15 @@ jobs:
           exit 1
           REMOTE_SCRIPT
 
-      - name: Remove runner SSH files
+      - name: Remove temporary deployment files
         if: always()
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
         run: |
+          if [[ -n "${VPS_HOST:-}" && -f "$HOME/.ssh/jts_vps_key" && -f "$HOME/.ssh/known_hosts" ]]; then
+            REMOTE_DIR="/tmp/jts-panel-$GITHUB_SHA"
+            ssh -i "$HOME/.ssh/jts_vps_key" -p "$VPS_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$VPS_USER@$VPS_HOST" "rm -rf '$REMOTE_DIR'" || true
+          fi
           rm -rf "$RUNNER_TEMP/jts-panel" "$HOME/.ssh/jts_vps_key" "$HOME/.ssh/known_hosts"
