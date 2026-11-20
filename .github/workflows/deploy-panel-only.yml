@@ -195,7 +195,7 @@ jobs:
               result.append(f"{key}={new_values[key]}")
 
           temp_path = env_path.with_name(env_path.name + ".tmp")
-          temp_path.write_text("\\n".join(result) + "\\n", encoding="utf-8")
+          temp_path.write_text("\n".join(result) + "\n", encoding="utf-8")
           os.chmod(temp_path, 0o600)
           temp_path.replace(env_path)
           PY
